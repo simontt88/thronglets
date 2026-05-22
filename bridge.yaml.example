@@ -1,0 +1,18 @@
+transport: telegram
+runtime: cursor
+workspace: /path/to/your/project
+
+telegram:
+  token: ${TELEGRAM_BOT_TOKEN}
+  allowed_chats:
+    - "your-chat-id"
+
+cursor:
+  api_key: ${CURSOR_API_KEY}
+  model: claude-opus-4-6
+
+session:
+  log_dir: ./logs
+  # Optional: sync conversations to a recall API
+  # recall_api: https://vibespace-five.vercel.app/api/sync/ingest
+  # recall_key: ${VIBESPACE_API_KEY}

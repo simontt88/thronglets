@@ -1,0 +1,23 @@
+{
+  "name": "agent-bridge",
+  "version": "0.1.0",
+  "description": "Bridge local workspace agent capabilities to messaging platforms",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "start": "node --import tsx src/index.ts",
+    "dev": "node --watch --import tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0",
+    "@cursor/sdk": "^1.0.0",
+    "yaml": "^2.7.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "@types/node": "^22.0.0",
+    "@types/node-telegram-bot-api": "^0.64.0",
+    "typescript": "^5.7.0"
+  }
+}

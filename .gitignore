@@ -1,0 +1,6 @@
+node_modules/
+dist/
+logs/
+bridge.yaml
+.env
+*.log
