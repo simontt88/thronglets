@@ -1,7 +1,7 @@
 {
   "name": "agent-bridge",
-  "version": "0.3.0",
-  "description": "Bridge local workspace agent capabilities to messaging platforms — multi-agent support with Cursor, Claude Code, and Codex",
+  "version": "0.4.0",
+  "description": "Multi-agent fleet orchestrator — bridge workspace capabilities to Telegram/Lark/Discord with Cursor, Claude Code, and Codex",
   "type": "module",
   "bin": {
     "agent-bridge": "./bin/agent-bridge.js"
