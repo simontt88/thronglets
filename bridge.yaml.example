@@ -1,61 +1,19 @@
-# Agent Bridge — Configuration
-# Docs: https://github.com/simontt88/agent-bridge
+transport: telegram
+runtime: cursor
 
-# --- Transport (choose one) ---
-transport: telegram    # telegram | lark | discord
-
-# Telegram (long-polling, no public URL needed)
 telegram:
   token: ${TELEGRAM_BOT_TOKEN}
   allowed_chats:
     - "your-chat-id"
 
-# Lark / Feishu (WebSocket long-connection, no public URL needed)
-# lark:
-#   app_id: ${LARK_APP_ID}
-#   app_secret: ${LARK_APP_SECRET}
-#   allowed_chats:
-#     - "oc_xxx"
-
-# Discord (gateway WebSocket, DM only)
-# discord:
-#   token: ${DISCORD_BOT_TOKEN}
-#   allowed_users:
-#     - "your-user-id"
-
-# --- Runtime (choose one) ---
-runtime: cursor        # cursor | claude-code | codex
-
-# Cursor SDK (local mode — full shell/file/git access)
 cursor:
   api_key: ${CURSOR_API_KEY}
   model: claude-opus-4-6
 
-# Claude Code SDK (built-in tools + CLAUDE.md support)
-# claude_code:
-#   model: claude-sonnet-4-6
-#   permission_mode: acceptEdits    # default | acceptEdits | bypassPermissions | plan | dontAsk
-#   allowed_tools: [Read, Edit, Glob, Grep]
-#   disallowed_tools: ["Bash(rm *)"]
-
-# Codex SDK (OpenAI agent with thread persistence)
-# codex:
-#   model: gpt-5.4
-#   approval_policy: auto-edit      # auto-edit | full-auto | on-request
-
-# --- Permissions (unified, maps to runtime-specific controls) ---
-permissions:
-  mode: safe                         # readonly | safe | full | custom
-  # allowed_tools: [Read, Edit]      # custom mode only
-  # blocked_tools: ["Bash(rm -rf *)"]
-  # blocked_paths: ["/etc", "~/.ssh"]
-
-# --- Session & Recall ---
+# Optional: local conversation logs
 session:
   log_dir: ~/.agent-bridge/logs
-  store_dir: .agent-bridge           # relative to workspace; local recall data
-  recall: local                      # local | cloud | both | off
 
-  # Cloud recall (optional — sync to Vibespace or compatible API)
+  # Optional: sync conversations to a recall API
   # recall_api: https://your-api/api/sync/ingest
-  # recall_key: ${RECALL_API_KEY}
+  # recall_key: ${YOUR_API_KEY}

@@ -173,6 +173,44 @@ async function main() {
       const args = parts.slice(1);
 
       switch (cmd) {
+        case "/start": {
+          const runtimes = config.agents.map((a) => `  • ${a.runtime} — ${a.model}`).join("\n");
+          const wsList = workspaces.map((w) => `  • ${w.alias} — .../${w.path.split("/").pop()}`).join("\n");
+          const currentFleet = fleet.listAgents();
+          const fleetLine = currentFleet.length
+            ? `\nActive agents: ${currentFleet.join(", ")}\nSend messages directly or use @name prefix.`
+            : "\nNo agents running yet. Spawn one to get started:";
+          const welcome = [
+            "\u{1F916} Agent Bridge v0.4.0",
+            "",
+            "Multi-agent fleet orchestrator — each agent runs in a workspace with full file/shell/git access.",
+            "",
+            "\u{1F680} Quick Start:",
+            "  /new kevin cursor vs",
+            "  Then just type a message \u2014 it goes to your agent.",
+            "",
+            "\u{1F4CB} Commands:",
+            "  /new <name> <runtime> <workspace> \u2014 spawn agent",
+            "  /kill <name> \u2014 stop & remove agent",
+            "  /change <name> <model|workspace|runtime> <value> \u2014 switch config",
+            "  /clear <name> \u2014 reset session (keep agent)",
+            "  /fleet \u2014 list all agents + status",
+            "  /status <name> \u2014 agent detail",
+            "",
+            "\u{1F4AC} Messaging:",
+            "  Just type \u2014 goes to your only agent",
+            "  @name msg \u2014 route to specific agent",
+            "  @all msg \u2014 broadcast to all",
+            "",
+            `\u{2699}\uFE0F Runtimes:\n${runtimes}`,
+            "",
+            `\u{1F4C1} Workspaces:\n${wsList}`,
+            fleetLine,
+          ].join("\n");
+          await transport.sendReply(chatId, welcome);
+          return;
+        }
+
         case "/new": {
           const [name, runtime, workspace] = args;
           if (!name) {
@@ -205,6 +243,17 @@ async function main() {
           }
           const result = await fleet.clear(name);
           await transport.sendReply(chatId, result);
+          return;
+        }
+
+        case "/change": {
+          const [name, field, value] = args;
+          if (!name || !field || !value) {
+            await transport.sendReply(chatId, "Usage: /change <name> <model|workspace|runtime> <value>\n\nExamples:\n  /change kevin model claude-sonnet-4-6\n  /change kevin workspace vb\n  /change kevin runtime claude-code");
+            return;
+          }
+          const changeResult = await fleet.change(name, field, value, config, workspaces);
+          await transport.sendReply(chatId, changeResult);
           return;
         }
 
@@ -299,8 +348,7 @@ async function main() {
           await transport.sendTyping(chatId);
           const reply = await fleet.send(target, body);
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-          const label = targets.length > 1 ? `[${target} \u00B7 ${elapsed}s]\n` : "";
-          await transport.sendReply(chatId, `${label}${reply}`);
+          await transport.sendReply(chatId, `[${target} \u00B7 ${elapsed}s]\n${reply}`);
         } catch (err) {
           const errMsg = err instanceof Error ? err.message : String(err);
           const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
@@ -310,23 +358,26 @@ async function main() {
       return;
     }
 
-    // ── No @mention: send to single default agent (backward compat) ──
+    // ── No @mention: route to single agent or prompt user ──
     const agentList = fleet.listAgents();
     if (agentList.length === 1) {
       const target = agentList[0];
       await transport.sendTyping(chatId);
       const typingInterval = setInterval(() => { transport.sendTyping(chatId).catch(() => {}); }, 4000);
+      const startTime = Date.now();
       try {
         const reply = await fleet.send(target, text);
-        await transport.sendReply(chatId, reply);
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        await transport.sendReply(chatId, `[${target} · ${elapsed}s]\n${reply}`);
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        await transport.sendReply(chatId, `Error: ${errMsg.slice(0, 500)}`);
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        await transport.sendReply(chatId, `[${target} · ${elapsed}s · error]\n${errMsg.slice(0, 500)}`);
       } finally {
         clearInterval(typingInterval);
       }
     } else if (agentList.length === 0) {
-      await transport.sendReply(chatId, "No agents running. Use /new <name> <runtime> <workspace> to spawn one.\n\nExample: /new alpha cursor cwd");
+      await transport.sendReply(chatId, "No agents running.\n\nSpawn one: /new <name> [runtime] [workspace]\nExample: /new alpha cursor vs");
     } else {
       await transport.sendReply(chatId, `Multiple agents running. Use @name to address one:\n${agentList.map((n) => `  @${n}`).join("\n")}\n  @all (broadcast)`);
     }

@@ -153,10 +153,18 @@ export class FleetManager {
 
     try {
       if (!live.session) {
+        const sessionsDir = getSessionsDir(name);
+        const sessionContext = [
+          `You are agent "${name}" running in workspace: ${live.state.workspacePath}`,
+          `Your session history is stored at: ${sessionsDir}`,
+          `Each file is a JSONL log (one JSON object per line with ts, type, text fields).`,
+          `If the user asks to recall/search past conversations, read or grep these files.`,
+        ].join("\n");
+
         live.session = await live.runtime.createSession({
           cwd: live.state.workspacePath,
           model: live.state.model,
-          context: "",
+          context: sessionContext,
           name: `fleet-${name}-${live.sessionId}`,
         });
         this.bus.publish("session_started", name, live.sessionId);
@@ -216,6 +224,69 @@ export class FleetManager {
     this.persistState();
 
     return `Session cleared for "${name}". New session: ${newSessionId}`;
+  }
+
+  async change(name: string, field: string, value: string, config: BridgeConfig, workspaces: WorkspaceEntry[]): Promise<string> {
+    const live = this.agents.get(name);
+    if (!live) {
+      return `Agent "${name}" not found.`;
+    }
+
+    if (this.processing.has(name)) {
+      return `Agent "${name}" is busy. Wait for it to finish.`;
+    }
+
+    switch (field) {
+      case "model": {
+        // Close current session (model change requires new session)
+        if (live.session) {
+          try { live.session.close(); } catch {}
+          live.session = null;
+        }
+        live.state.model = value;
+        // Rebuild runtime with new model
+        const agentDef = this.config.getAgentDef(live.state.runtime as RuntimeType, value);
+        live.runtime = this.config.createRuntime(agentDef);
+        this.persistState();
+        return `"${name}" model changed to ${value}. Session reset.`;
+      }
+
+      case "workspace": {
+        const ws = workspaces.find((w) => w.alias === value);
+        if (!ws) {
+          return `Unknown workspace "${value}". Available: ${workspaces.map((w) => w.alias).join(", ")}`;
+        }
+        if (live.session) {
+          try { live.session.close(); } catch {}
+          live.session = null;
+        }
+        live.state.workspace = value;
+        live.state.workspacePath = ws.path;
+        this.persistState();
+        return `"${name}" workspace changed to ${value} (${ws.path}). Session reset.`;
+      }
+
+      case "runtime": {
+        const validRuntimes = ["cursor", "claude-code", "codex"];
+        if (!validRuntimes.includes(value)) {
+          return `Invalid runtime "${value}". Options: ${validRuntimes.join(", ")}`;
+        }
+        if (live.session) {
+          try { live.session.close(); } catch {}
+          live.session = null;
+        }
+        live.state.runtime = value as RuntimeType;
+        const newDef = this.config.getAgentDef(value as RuntimeType);
+        live.state.model = newDef.model;
+        live.runtime = this.config.createRuntime(newDef);
+        await this.config.ensureRulesSync(newDef);
+        this.persistState();
+        return `"${name}" switched to ${value} (${newDef.model}). Session reset.`;
+      }
+
+      default:
+        return `Unknown field "${field}". Use: model, workspace, or runtime.`;
+    }
   }
 
   isProcessing(name: string): boolean {
