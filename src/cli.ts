@@ -1,11 +1,13 @@
 import { resolve } from "path";
 
 interface CliOptions {
-  command: "start" | "setup" | "help";
+  command: "start" | "setup" | "rules" | "help";
   workspace?: string;
   transport?: string;
   model?: string;
   config?: string;
+  rulesAction?: "sync" | "status";
+  rulesTarget?: "claude-code" | "codex" | "all";
 }
 
 function parseArgs(args: string[]): CliOptions {
@@ -24,6 +26,8 @@ function parseArgs(args: string[]): CliOptions {
       opts.model = args[++i];
     } else if (arg === "--config" || arg === "-c") {
       opts.config = args[++i];
+    } else if (arg === "--target") {
+      opts.rulesTarget = args[++i] as CliOptions["rulesTarget"];
     } else if (arg === "--help" || arg === "-h") {
       opts.command = "help";
     } else if (!arg.startsWith("-")) {
@@ -34,7 +38,15 @@ function parseArgs(args: string[]): CliOptions {
   if (positional[0]) {
     const cmd = positional[0];
     if (cmd === "start" || cmd === "setup" || cmd === "help") {
-      opts.command = cmd;
+      opts.command = cmd as CliOptions["command"];
+    } else if (cmd === "rules") {
+      opts.command = "rules";
+      const action = positional[1];
+      if (action === "sync" || action === "status") {
+        opts.rulesAction = action;
+      } else {
+        opts.rulesAction = "sync";
+      }
     }
   }
 
@@ -48,6 +60,8 @@ agent-bridge — Bridge local workspace agent capabilities to messaging platform
 Usage:
   agent-bridge start [options]     Start the bridge (default command)
   agent-bridge setup               Configure global credentials
+  agent-bridge rules sync          Sync .cursor/rules/ → .claude/rules/ + Codex
+  agent-bridge rules status        Show rules sync status
   agent-bridge help                Show this help
 
 Options:
@@ -55,6 +69,7 @@ Options:
   -t, --transport <name>   Transport: telegram, lark, slack (default: from config)
   -m, --model <id>         Model override (default: from config)
   -c, --config <path>      Config file path override
+  --target <runtime>       Rules sync target: claude-code, codex, all (default: all)
 
 Config resolution (highest to lowest priority):
   1. CLI args (--workspace, --model, etc.)
@@ -86,6 +101,28 @@ export async function run(argv?: string[]) {
   if (opts.command === "setup") {
     const { runSetup } = await import("./setup.js");
     await runSetup();
+    return;
+  }
+
+  if (opts.command === "rules") {
+    const workspace = resolve(opts.workspace || process.env.BRIDGE_WORKSPACE || process.cwd());
+    const { syncRules, printSyncResults, getRulesStatus } = await import("./rules-sync.js");
+
+    if (opts.rulesAction === "status") {
+      const status = getRulesStatus(workspace);
+      console.log(`\n[rules] Status for: ${workspace}`);
+      console.log(`  AGENTS.md:           ${status.agentsMd ? "yes" : "no"}`);
+      console.log(`  .cursor/rules/:      ${status.cursorRules} files`);
+      console.log(`  .claude/CLAUDE.md:   ${status.claudeMd ? "yes" : "no"}`);
+      console.log(`  .claude/rules/:      ${status.claudeRules} files`);
+      console.log(`  AGENTS.override.md:  ${status.codexOverride ? "yes" : "no"}`);
+      console.log(`  In sync:             ${status.inSync ? "yes" : "no"}`);
+    } else {
+      const target = opts.rulesTarget || "all";
+      console.log(`[rules] Syncing rules for: ${workspace} (target: ${target})`);
+      const results = await syncRules(workspace, target);
+      printSyncResults(results);
+    }
     return;
   }
 

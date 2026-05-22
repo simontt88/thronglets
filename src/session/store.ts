@@ -1,5 +1,7 @@
 import { appendFileSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
+import { LocalRecall, type RecallEntry } from "../recall/local.js";
+import type { RecallMode } from "../config.js";
 
 export interface LogEntry {
   ts: string;
@@ -9,43 +11,69 @@ export interface LogEntry {
   content: string;
 }
 
-export interface RecallConfig {
+export interface CloudRecallConfig {
   apiUrl: string;
   apiKey: string;
   workspaceId?: string;
   workspacePath?: string;
 }
 
+export interface StoreConfig {
+  logDir: string;
+  storeDir: string;
+  recallMode: RecallMode;
+  cloud?: CloudRecallConfig;
+}
+
 export class SessionStore {
   private logDir: string;
-  private recall: RecallConfig | null;
+  private localRecall: LocalRecall;
+  private cloud: CloudRecallConfig | null;
+  private recallMode: RecallMode;
 
-  constructor(logDir: string, recall?: RecallConfig) {
-    this.logDir = logDir;
-    this.recall = recall || null;
-    if (!existsSync(logDir)) mkdirSync(logDir, { recursive: true });
+  constructor(config: StoreConfig) {
+    this.logDir = config.logDir;
+    this.localRecall = new LocalRecall(config.storeDir);
+    this.cloud = config.cloud || null;
+    this.recallMode = config.recallMode;
+    if (!existsSync(config.logDir)) mkdirSync(config.logDir, { recursive: true });
   }
 
   log(entry: Omit<LogEntry, "ts">): void {
     const full: LogEntry = { ts: new Date().toISOString(), ...entry };
+
+    // Legacy date-based log file
     const date = full.ts.split("T")[0];
     const file = join(this.logDir, `${date}.jsonl`);
     appendFileSync(file, JSON.stringify(full) + "\n");
+
+    // Local recall (per-session structured store)
+    if (this.recallMode === "local" || this.recallMode === "both") {
+      const recallEntry: RecallEntry = {
+        ts: full.ts,
+        sessionId: full.sessionId,
+        chatId: full.chatId,
+        role: full.role,
+        content: full.content,
+      };
+      this.localRecall.log(recallEntry);
+    }
   }
 
   async sync(sessionId: string, role: "user" | "assistant", content: string): Promise<void> {
-    if (!this.recall) return;
+    if (this.recallMode === "off" || this.recallMode === "local") return;
+    if (!this.cloud) return;
 
     const eventType = role === "user" ? "chat_message_user" : "chat_message_assistant";
 
     try {
-      const url = this.recall.apiUrl.endsWith("/ingest")
-        ? this.recall.apiUrl
-        : `${this.recall.apiUrl}/api/sync/ingest`;
+      const url = this.cloud.apiUrl.endsWith("/ingest")
+        ? this.cloud.apiUrl
+        : `${this.cloud.apiUrl}/api/sync/ingest`;
       const res = await fetch(url, {
         method: "POST",
         headers: {
-          "Authorization": `Bearer ${this.recall.apiKey}`,
+          "Authorization": `Bearer ${this.cloud.apiKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -54,18 +82,22 @@ export class SessionStore {
             timestamp: new Date().toISOString(),
             event_type: eventType,
             platform: "agent-bridge",
-            workspace_id: this.recall.workspaceId || "agent-bridge",
-            workspace_path: this.recall.workspacePath || "",
+            workspace_id: this.cloud.workspaceId || "agent-bridge",
+            workspace_path: this.cloud.workspacePath || "",
             content,
           }],
         }),
       });
 
       if (!res.ok) {
-        console.error(`[store] recall sync failed (${res.status})`);
+        console.error(`[store] cloud recall sync failed (${res.status})`);
       }
     } catch (err) {
-      console.error(`[store] recall sync error:`, err);
+      console.error(`[store] cloud recall sync error:`, err);
     }
+  }
+
+  getLocalRecall(): LocalRecall {
+    return this.localRecall;
   }
 }

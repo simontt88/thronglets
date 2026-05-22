@@ -1,2 +1,4 @@
 export type { Transport, IncomingMessage, TransportOptions } from "./interface.js";
-export { TelegramTransport, type TelegramConfig } from "./telegram.js";
+export { TelegramTransport } from "./telegram.js";
+export { LarkTransport } from "./lark.js";
+export { DiscordTransport } from "./discord.js";

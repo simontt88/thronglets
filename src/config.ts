@@ -3,26 +3,59 @@ import { join, resolve } from "path";
 import { homedir } from "os";
 import { parse as parseYaml } from "yaml";
 
+export type TransportType = "telegram" | "lark" | "discord";
+export type RuntimeType = "cursor" | "claude-code" | "codex";
+export type PermissionMode = "readonly" | "safe" | "full" | "custom";
+export type RecallMode = "local" | "cloud" | "both" | "off";
+
+export interface TelegramConfig {
+  token: string;
+  allowedChats?: string[];
+}
+
+export interface LarkConfig {
+  appId: string;
+  appSecret: string;
+  allowedChats?: string[];
+}
+
+export interface DiscordConfig {
+  token: string;
+  allowedUsers?: string[];
+}
+
+export interface AgentDef {
+  name: string;
+  runtime: RuntimeType;
+  apiKey: string;
+  model: string;
+  permissionMode?: string;
+  allowedTools?: string[];
+  disallowedTools?: string[];
+  approvalPolicy?: string;
+}
+
+export interface SessionConfig {
+  logDir: string;
+  storeDir?: string;
+  recall: RecallMode;
+  recallApi?: string;
+  recallKey?: string;
+}
+
 export interface BridgeConfig {
-  transport: "telegram" | "lark" | "slack" | "discord";
-  runtime: "cursor" | "claude" | "codex";
+  transport: TransportType;
   workspace: string;
 
-  telegram?: {
-    token: string;
-    allowedChats?: string[];
-  };
+  telegram?: TelegramConfig;
+  lark?: LarkConfig;
+  discord?: DiscordConfig;
 
-  cursor?: {
-    apiKey: string;
-    model: string;
-  };
+  agents: AgentDef[];
+  active: string;
 
-  session?: {
-    logDir: string;
-    recallApi?: string;
-    recallKey?: string;
-  };
+  permissions?: { mode: PermissionMode };
+  session?: SessionConfig;
 }
 
 const GLOBAL_CONFIG_DIR = join(homedir(), ".agent-bridge");
@@ -67,34 +100,18 @@ function loadYamlFile(path: string): Record<string, unknown> | null {
   }
 }
 
-function buildFromEnv(): Record<string, unknown> {
-  const env: Record<string, unknown> = {};
-
-  if (process.env.BRIDGE_TRANSPORT) env.transport = process.env.BRIDGE_TRANSPORT;
-  if (process.env.BRIDGE_RUNTIME) env.runtime = process.env.BRIDGE_RUNTIME;
-  if (process.env.BRIDGE_WORKSPACE || process.env._BRIDGE_RESOLVED_WORKSPACE) {
-    env.workspace = process.env._BRIDGE_RESOLVED_WORKSPACE || process.env.BRIDGE_WORKSPACE;
-  }
-
-  const telegram: Record<string, unknown> = {};
-  if (process.env.TELEGRAM_BOT_TOKEN) telegram.token = process.env.TELEGRAM_BOT_TOKEN;
-  if (process.env.TELEGRAM_ALLOWED_CHATS) {
-    telegram.allowedChats = process.env.TELEGRAM_ALLOWED_CHATS.split(",").map((s) => s.trim());
-  }
-  if (Object.keys(telegram).length) env.telegram = telegram;
-
-  const cursor: Record<string, unknown> = {};
-  if (process.env.CURSOR_API_KEY) cursor.apiKey = process.env.CURSOR_API_KEY;
-  if (process.env.CURSOR_MODEL) cursor.model = process.env.CURSOR_MODEL;
-  if (Object.keys(cursor).length) env.cursor = cursor;
-
-  const session: Record<string, unknown> = {};
-  if (process.env.BRIDGE_LOG_DIR) session.logDir = process.env.BRIDGE_LOG_DIR;
-  if (process.env.RECALL_API_URL) session.recallApi = process.env.RECALL_API_URL;
-  if (process.env.RECALL_API_KEY) session.recallKey = process.env.RECALL_API_KEY;
-  if (Object.keys(session).length) env.session = session;
-
-  return env;
+function parseAgents(raw: unknown): AgentDef[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map((a: Record<string, unknown>) => ({
+    name: (a.name as string) || "default",
+    runtime: (a.runtime as RuntimeType) || "cursor",
+    apiKey: (a.api_key || a.apiKey || "") as string,
+    model: (a.model as string) || "",
+    permissionMode: (a.permission_mode || a.permissionMode) as string | undefined,
+    allowedTools: (a.allowed_tools || a.allowedTools) as string[] | undefined,
+    disallowedTools: (a.disallowed_tools || a.disallowedTools) as string[] | undefined,
+    approvalPolicy: (a.approval_policy || a.approvalPolicy) as string | undefined,
+  }));
 }
 
 export function loadConfig(): BridgeConfig {
@@ -102,13 +119,11 @@ export function loadConfig(): BridgeConfig {
     process.env._BRIDGE_RESOLVED_WORKSPACE || process.env.BRIDGE_WORKSPACE || process.cwd()
   );
 
-  // Layer 1: Global config (~/.agent-bridge/config.yaml)
   let merged: Record<string, unknown> = loadYamlFile(GLOBAL_CONFIG_PATH) || {};
   if (Object.keys(merged).length) {
     console.log(`[config] loaded global: ${GLOBAL_CONFIG_PATH}`);
   }
 
-  // Layer 2: Workspace-local config ({workspace}/bridge.yaml)
   const explicitConfig = process.env._BRIDGE_CONFIG_PATH;
   const workspaceConfigPaths = explicitConfig
     ? [explicitConfig]
@@ -123,32 +138,60 @@ export function loadConfig(): BridgeConfig {
     }
   }
 
-  // Layer 3: Environment variables (highest priority)
-  const envOverrides = buildFromEnv();
-  merged = deepMerge(merged, envOverrides);
-
-  // Resolve ${VAR} references
   const resolved = resolveDeep(merged) as Record<string, unknown>;
 
-  // Normalize snake_case keys from YAML to camelCase
   const rawTelegram = resolved.telegram as Record<string, unknown> | undefined;
-  const rawCursor = resolved.cursor as Record<string, unknown> | undefined;
+  const rawLark = resolved.lark as Record<string, unknown> | undefined;
+  const rawDiscord = resolved.discord as Record<string, unknown> | undefined;
   const rawSession = resolved.session as Record<string, unknown> | undefined;
+  const rawPermissions = resolved.permissions as Record<string, unknown> | undefined;
+
+  const agents = parseAgents(resolved.agents);
+
+  // Backward compat: if no "agents" array, build from old single-runtime config
+  if (!agents.length) {
+    const rawCursor = resolved.cursor as Record<string, unknown> | undefined;
+    if (rawCursor) {
+      agents.push({
+        name: "cursor",
+        runtime: "cursor",
+        apiKey: (rawCursor.api_key || rawCursor.apiKey || "") as string,
+        model: (rawCursor.model as string) || "claude-opus-4-6",
+      });
+    }
+  }
 
   const config: BridgeConfig = {
-    transport: (resolved.transport as string || "telegram") as BridgeConfig["transport"],
-    runtime: (resolved.runtime as string || "cursor") as BridgeConfig["runtime"],
+    transport: (resolved.transport as string || "telegram") as TransportType,
     workspace,
+
     telegram: rawTelegram ? {
       token: (rawTelegram.token as string) || "",
       allowedChats: (rawTelegram.allowed_chats || rawTelegram.allowedChats) as string[] | undefined,
     } : undefined,
-    cursor: rawCursor ? {
-      apiKey: (rawCursor.api_key || rawCursor.apiKey) as string || "",
-      model: (rawCursor.model as string) || "claude-opus-4-6",
+
+    lark: rawLark ? {
+      appId: (rawLark.app_id || rawLark.appId || "") as string,
+      appSecret: (rawLark.app_secret || rawLark.appSecret || "") as string,
+      allowedChats: (rawLark.allowed_chats || rawLark.allowedChats) as string[] | undefined,
     } : undefined,
+
+    discord: rawDiscord ? {
+      token: (rawDiscord.token as string) || "",
+      allowedUsers: (rawDiscord.allowed_users || rawDiscord.allowedUsers) as string[] | undefined,
+    } : undefined,
+
+    agents,
+    active: (resolved.active as string) || agents[0]?.name || "",
+
+    permissions: rawPermissions ? {
+      mode: (rawPermissions.mode as PermissionMode) || "safe",
+    } : { mode: "safe" },
+
     session: rawSession ? {
-      logDir: (rawSession.log_dir || rawSession.logDir) as string || "",
+      logDir: (rawSession.log_dir || rawSession.logDir || "") as string,
+      storeDir: (rawSession.store_dir || rawSession.storeDir) as string | undefined,
+      recall: (rawSession.recall as RecallMode) || "local",
       recallApi: (rawSession.recall_api || rawSession.recallApi) as string | undefined,
       recallKey: (rawSession.recall_key || rawSession.recallKey) as string | undefined,
     } : undefined,
@@ -156,12 +199,28 @@ export function loadConfig(): BridgeConfig {
 
   // Defaults
   if (!config.session) {
-    config.session = { logDir: join(GLOBAL_CONFIG_DIR, "logs") };
+    config.session = { logDir: join(GLOBAL_CONFIG_DIR, "logs"), recall: "local" };
   }
   if (!config.session.logDir) {
     config.session.logDir = join(GLOBAL_CONFIG_DIR, "logs");
   }
   config.session.logDir = resolve(config.session.logDir.replace(/^~/, homedir()));
 
+  if (config.session.storeDir) {
+    config.session.storeDir = resolve(
+      config.session.storeDir.startsWith("~")
+        ? config.session.storeDir.replace(/^~/, homedir())
+        : config.session.storeDir.startsWith("/")
+          ? config.session.storeDir
+          : join(workspace, config.session.storeDir)
+    );
+  } else {
+    config.session.storeDir = join(workspace, ".agent-bridge");
+  }
+
   return config;
+}
+
+export function getAgentByName(config: BridgeConfig, name: string): AgentDef | undefined {
+  return config.agents.find((a) => a.name === name);
 }
