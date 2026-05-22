@@ -37,11 +37,9 @@ export class CursorRuntime implements Runtime {
       local: { cwd: opts.cwd },
     });
 
-    // Inject workspace context as first message
-    if (opts.context) {
-      const run = await agent.send(opts.context);
-      await run.wait();
-    }
+    // No manual context injection needed — Cursor SDK in local mode
+    // automatically reads .cursor/rules/ and AGENTS.md from cwd,
+    // exactly like opening the IDE on that directory.
 
     return new CursorSession(agent);
   }

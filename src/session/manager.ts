@@ -1,7 +1,6 @@
 import type { AgentSession } from "../runtimes/interface.js";
 import type { Runtime } from "../runtimes/interface.js";
 import { SessionStore } from "./store.js";
-import { buildInitMessage } from "../context/injector.js";
 
 interface ActiveSession {
   id: string;
@@ -39,12 +38,11 @@ export class SessionManager {
     if (existing) return existing;
 
     const sessionId = this.generateId();
-    const context = buildInitMessage(this.config.workspace);
 
     const agent = await this.runtime.createSession({
       cwd: this.config.workspace,
       model: this.config.model,
-      context,
+      context: "",
       name: `bridge-${chatId}-${sessionId.slice(-8)}`,
     });
 
