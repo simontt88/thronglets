@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "description": "Bridge local workspace agent capabilities to messaging platforms",
   "type": "module",
-  "main": "src/index.ts",
+  "bin": {
+    "agent-bridge": "./bin/agent-bridge.js"
+  },
   "scripts": {
     "start": "node --import tsx src/index.ts",
     "dev": "node --watch --import tsx src/index.ts",

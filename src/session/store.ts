@@ -39,7 +39,10 @@ export class SessionStore {
     const eventType = role === "user" ? "chat_message_user" : "chat_message_assistant";
 
     try {
-      const res = await fetch(`${this.recall.apiUrl}/api/sync/ingest`, {
+      const url = this.recall.apiUrl.endsWith("/ingest")
+        ? this.recall.apiUrl
+        : `${this.recall.apiUrl}/api/sync/ingest`;
+      const res = await fetch(url, {
         method: "POST",
         headers: {
           "Authorization": `Bearer ${this.recall.apiKey}`,
