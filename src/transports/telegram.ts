@@ -17,6 +17,10 @@ export class TelegramTransport implements Transport {
   private handler: ((msg: IncomingMessage) => Promise<void>) | null = null;
   private allowedChats: Set<string>;
 
+  getBot(): TelegramBot | null {
+    return this.bot;
+  }
+
   constructor(private config: TelegramConfig) {
     this.allowedChats = new Set(config.allowedChats || []);
   }

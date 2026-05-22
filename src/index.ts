@@ -6,6 +6,8 @@ import { CodexRuntime } from "./runtimes/codex.js";
 import { FleetManager, FleetEventBus } from "./fleet/index.js";
 import type { WorkspaceEntry } from "./fleet/index.js";
 import { syncRules } from "./rules-sync.js";
+import { startServer } from "./server/index.js";
+import { setupInlineButtons, sendNewPrompt, sendChangePrompt, sendKillPrompt, sendClearPrompt } from "./transports/telegram-buttons.js";
 import type { Transport } from "./transports/interface.js";
 import type { Runtime } from "./runtimes/interface.js";
 import { homedir } from "os";
@@ -157,6 +159,9 @@ async function main() {
   // Restore fleet from disk
   await fleet.restore();
 
+  // Start HTTP + WebSocket server
+  const { port } = startServer(fleet, bus, config, workspaces);
+
   // Log all events
   bus.onEvent((event) => {
     const detail = event.payload ? ` ${JSON.stringify(event.payload).slice(0, 80)}` : "";
@@ -213,6 +218,10 @@ async function main() {
 
         case "/new": {
           const [name, runtime, workspace] = args;
+          if (!name && transport instanceof TelegramTransport && transport.getBot()) {
+            sendNewPrompt(transport.getBot()!, chatId);
+            return;
+          }
           if (!name) {
             await transport.sendReply(chatId, "Usage: /new <name> [runtime] [workspace]\n\nRuntimes: cursor, claude-code, codex\nWorkspaces: " + workspaces.map((w) => w.alias).join(", "));
             return;
@@ -226,6 +235,10 @@ async function main() {
 
         case "/kill": {
           const name = args[0];
+          if (!name && transport instanceof TelegramTransport && transport.getBot()) {
+            sendKillPrompt(transport.getBot()!, chatId);
+            return;
+          }
           if (!name) {
             await transport.sendReply(chatId, "Usage: /kill <name>");
             return;
@@ -237,6 +250,10 @@ async function main() {
 
         case "/clear": {
           const name = args[0];
+          if (!name && transport instanceof TelegramTransport && transport.getBot()) {
+            sendClearPrompt(transport.getBot()!, chatId);
+            return;
+          }
           if (!name) {
             await transport.sendReply(chatId, "Usage: /clear <name>");
             return;
@@ -248,6 +265,10 @@ async function main() {
 
         case "/change": {
           const [name, field, value] = args;
+          if ((!name || !field || !value) && transport instanceof TelegramTransport && transport.getBot()) {
+            sendChangePrompt(transport.getBot()!, chatId);
+            return;
+          }
           if (!name || !field || !value) {
             await transport.sendReply(chatId, "Usage: /change <name> <model|workspace|runtime> <value>\n\nExamples:\n  /change kevin model claude-sonnet-4-6\n  /change kevin workspace vb\n  /change kevin runtime claude-code");
             return;
@@ -385,12 +406,22 @@ async function main() {
 
   await transport.start();
 
-  console.log(`\nAgent Bridge v0.4.0 (Fleet Mode)`);
+  // Setup inline buttons if using Telegram
+  if (transport instanceof TelegramTransport) {
+    const bot = transport.getBot();
+    if (bot) {
+      setupInlineButtons(bot, fleet, config, workspaces);
+    }
+  }
+
+  console.log(`\nAgent Bridge v0.5.0 (Fleet Mode)`);
   console.log(`  Transport:   ${transport.name}`);
+  console.log(`  API:         http://127.0.0.1:${port}`);
+  console.log(`  WebSocket:   ws://127.0.0.1:${port}/ws`);
   console.log(`  Workspaces:  ${workspaces.map((w) => `${w.alias}→${w.path.split("/").pop()}`).join(", ")}`);
   console.log(`  Agents def:  ${config.agents.map((a) => `${a.name}(${a.runtime})`).join(", ")}`);
   console.log(`  Fleet:       ${fleet.listAgents().length} restored`);
-  console.log(`\n  Commands: /new /kill /fleet /clear /status /help`);
+  console.log(`\n  Commands: /new /kill /fleet /clear /change /status /help`);
   console.log(`  Mention:  @name message | @all message\n`);
 
   setInterval(() => {
