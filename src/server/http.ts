@@ -1,8 +1,9 @@
 import express from "express";
+import { join } from "path";
 import type { FleetManager } from "../fleet/index.js";
 import type { BridgeConfig, RuntimeType } from "../config.js";
 import type { WorkspaceEntry } from "../fleet/index.js";
-import { readdirSync, readFileSync } from "fs";
+import { readdirSync, readFileSync, existsSync } from "fs";
 import { getSessionsDir } from "../fleet/state.js";
 
 const startTime = Date.now();
@@ -55,18 +56,33 @@ export function createHttpApp(
     }
 
     const limit = Math.min(parseInt(req.query.limit as string) || 50, 500);
-    const agent = fleet.getAgent(name)!;
+    const sessionId = (req.query.session as string) || fleet.getAgent(name)!.currentSessionId;
     const sessionsDir = getSessionsDir(name);
 
     try {
-      const sessionFile = `${sessionsDir}/${agent.currentSessionId}.jsonl`;
+      const sessionFile = `${sessionsDir}/${sessionId}.jsonl`;
       const lines = readFileSync(sessionFile, "utf-8").trim().split("\n");
       const events = lines.slice(-limit).map((l) => {
         try { return JSON.parse(l); } catch { return null; }
       }).filter(Boolean);
-      res.json({ sessionId: agent.currentSessionId, events, total: lines.length });
+      res.json({ sessionId, events, total: lines.length });
     } catch {
-      res.json({ sessionId: agent.currentSessionId, events: [], total: 0 });
+      res.json({ sessionId, events: [], total: 0 });
+    }
+  });
+
+  app.get("/api/agents/:name/sessions", (req, res) => {
+    const name = req.params.name;
+    const sessionsDir = getSessionsDir(name);
+    try {
+      const files = readdirSync(sessionsDir)
+        .filter((f) => f.endsWith(".jsonl"))
+        .map((f) => f.replace(".jsonl", ""))
+        .sort()
+        .reverse();
+      res.json({ agent: name, sessions: files });
+    } catch {
+      res.json({ agent: name, sessions: [] });
     }
   });
 
