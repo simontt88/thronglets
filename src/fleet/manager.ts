@@ -67,6 +67,7 @@ const HEALTH_CHECK_INTERVAL_MS = 30 * 1000; // check every 30s
 
 export type ReplyRoutingCallback = (fromAgent: string, toAgent: string, reply: string) => void;
 export type PeerMessageCallback = (fromAgent: string, toAgent: string, direction: "sent" | "replied") => void;
+export type DispatcherBroadcastCallback = (reply: string, triggerAgent: string) => void;
 
 export class FleetManager {
   private agents = new Map<string, LiveAgent>();
@@ -76,6 +77,7 @@ export class FleetManager {
   private postReplyHook: ((agentName: string, reply: string, sender: MessageSender) => Promise<string>) | null = null;
   private replyRoutingCallback: ReplyRoutingCallback | null = null;
   private peerMessageCallback: PeerMessageCallback | null = null;
+  private dispatcherBroadcastCallback: DispatcherBroadcastCallback | null = null;
 
   constructor(bus: FleetEventBus, config: FleetManagerConfig) {
     this.bus = bus;
@@ -93,6 +95,10 @@ export class FleetManager {
 
   onPeerMessage(callback: PeerMessageCallback): void {
     this.peerMessageCallback = callback;
+  }
+
+  onDispatcherBroadcast(callback: DispatcherBroadcastCallback): void {
+    this.dispatcherBroadcastCallback = callback;
   }
 
   private startHealthCheck(): void {
@@ -422,6 +428,12 @@ export class FleetManager {
       // Reply routing: if message was from another agent, route reply back
       if (sender !== "user") {
         this.routeReplyToSender(name, sender, reply!);
+
+        // When dispatcher replies to an agent, broadcast to user (Telegram)
+        // so the user sees the dispatcher's summary/status updates
+        if (name === "_dispatcher" && this.dispatcherBroadcastCallback && reply!.trim()) {
+          this.dispatcherBroadcastCallback(reply!, sender as string);
+        }
       }
 
       this.finishProcessing(name, live);

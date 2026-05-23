@@ -174,6 +174,14 @@ async function main() {
     transport.sendReply(notifyChatId, `${label} ${from} ${arrow} ${to}`).catch(() => {});
   });
 
+  // When dispatcher processes an agent's reply and generates a summary,
+  // forward it to Telegram so the user sees status updates
+  fleet.onDispatcherBroadcast((reply, fromAgent) => {
+    if (!notifyChatId) return;
+    const truncated = reply.length > 1500 ? reply.slice(0, 1500) + "…" : reply;
+    transport.sendReply(notifyChatId, `[dispatcher · re:${fromAgent}]\n${truncated}`).catch(() => {});
+  });
+
   // Start dispatcher (if enabled in config)
   const dispatcherConfig = getDispatcherConfig(config);
   await startDispatcher(fleet, bus, config, workspaces);
