@@ -115,17 +115,16 @@ export class TelegramTransport implements Transport {
 
     const seed = `thronglet-bot-${Date.now()}`;
     const png = renderAvatarPNG(seed);
-    const tmpPath = join(THRONGLETS_HOME, "bot-avatar.png");
     mkdirSync(THRONGLETS_HOME, { recursive: true });
-    writeFileSync(tmpPath, png);
+    writeFileSync(join(THRONGLETS_HOME, "bot-avatar.png"), png);
 
     try {
-      // Telegram Bot API: setMyProfilePhoto requires multipart upload
-      const FormData = (await import("node:buffer")).Buffer;
       const url = `https://api.telegram.org/bot${this.config.token}/setMyProfilePhoto`;
-      const boundary = "----ThrongletsAvatarBoundary";
+      const boundary = "----ThrongletsAvatar" + Date.now();
+      const photoJson = JSON.stringify({ type: "static", photo: "attach://photo_file" });
       const body = Buffer.concat([
-        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="photo"; filename="avatar.png"\r\nContent-Type: image/png\r\n\r\n`),
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="photo"\r\n\r\n${photoJson}\r\n`),
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="photo_file"; filename="avatar.png"\r\nContent-Type: image/png\r\n\r\n`),
         png,
         Buffer.from(`\r\n--${boundary}--\r\n`),
       ]);
@@ -141,7 +140,7 @@ export class TelegramTransport implements Transport {
         console.log("[telegram] bot avatar set successfully");
       } else {
         const text = await res.text();
-        console.warn(`[telegram] avatar API returned ${res.status}: ${text.slice(0, 120)}`);
+        console.warn(`[telegram] avatar API returned ${res.status}: ${text.slice(0, 200)}`);
       }
     } catch (err) {
       console.warn(`[telegram] avatar upload error: ${(err as Error).message?.slice(0, 80)}`);

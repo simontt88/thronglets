@@ -51,10 +51,18 @@ export function loadWorkspaces(): WorkspaceEntry[] {
   try {
     const raw = readFileSync(WORKSPACES_FILE, "utf-8");
     const parsed = parseYaml(raw);
-    if (!parsed?.workspaces || !Array.isArray(parsed.workspaces)) return [];
-    return parsed.workspaces.map((w: { alias: string; path: string }) => ({
-      alias: w.alias,
-      path: w.path,
+    if (!parsed?.workspaces) return [];
+    const ws = parsed.workspaces;
+    if (Array.isArray(ws)) {
+      return ws.map((w: { alias: string; path: string }) => ({
+        alias: w.alias,
+        path: w.path,
+      }));
+    }
+    // Handle object format: { alias1: { path: "..." }, alias2: "/path" }
+    return Object.entries(ws).map(([alias, val]: [string, any]) => ({
+      alias,
+      path: typeof val === "string" ? val : val.path,
     }));
   } catch {
     return [];
