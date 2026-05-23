@@ -112,22 +112,39 @@ export class FleetManager {
       if (live.state.status === "working" && live.state.lastActivity) {
         const elapsed = now - new Date(live.state.lastActivity).getTime();
         if (elapsed > SEND_TIMEOUT_MS + 30_000) {
-          live.state.status = "dead";
-          live.state.inferred = `unresponsive for ${Math.round(elapsed / 60_000)}min — marked dead`;
-          this.bus.publish("status_change", name, live.sessionId, { status: "dead" });
-          this.logToSession(name, live.sessionId, {
-            type: "health_check",
-            status: "dead",
-            elapsed_ms: elapsed,
-          });
+          console.log(`[fleet] ${name}: unresponsive for ${Math.round(elapsed / 60_000)}min — auto-recovering`);
           live.processing = false;
           if (live.session) {
             try { live.session.close(); } catch {}
             live.session = null;
           }
+
+          // Auto-nudge: transition dead → sleeping instead of staying dead
+          // Agent will reconnect automatically on next message
+          live.state.status = "sleeping";
+          live.state.inferred = `auto-recovered — was unresponsive for ${Math.round(elapsed / 60_000)}min`;
+          this.bus.publish("status_change", name, live.sessionId, { status: "sleeping" });
+          this.logToSession(name, live.sessionId, {
+            type: "health_check",
+            status: "auto_recovered",
+            elapsed_ms: elapsed,
+          });
           stateChanged = true;
-          console.log(`[fleet] ${name}: marked DEAD after ${Math.round(elapsed / 60_000)}min unresponsive`);
         }
+      }
+
+      // Auto-recover dead/error → sleeping (no need to stay stuck)
+      if (live.state.status === "dead" || live.state.status === "error") {
+        console.log(`[fleet] ${name}: auto-recovering from ${live.state.status} → sleeping`);
+        if (live.session) {
+          try { live.session.close(); } catch {}
+          live.session = null;
+        }
+        live.processing = false;
+        live.state.status = "sleeping";
+        live.state.inferred = `auto-recovered from ${live.state.status} — will reconnect on next message`;
+        this.bus.publish("status_change", name, live.sessionId, { status: "sleeping" });
+        stateChanged = true;
       }
 
       // Transition waiting → sleeping when session has been idle past max age
@@ -756,8 +773,9 @@ export class FleetManager {
       const runtimeInstance = this.config.createRuntime(agentDef);
 
       // On restart: active states become "sleeping" (session gone), handle legacy "idle" too
+      // On restart: any non-stopped state becomes sleeping (session is gone)
       const rawStatus = agentState.status as string;
-      const restoredStatus: AgentStatus = (rawStatus === "working" || rawStatus === "waiting" || rawStatus === "idle") ? "sleeping" : agentState.status;
+      const restoredStatus: AgentStatus = rawStatus === "stopped" ? "stopped" : "sleeping";
       this.agents.set(name, {
         state: { ...agentState, status: restoredStatus },
         runtime: runtimeInstance,
