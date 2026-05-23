@@ -1,5 +1,5 @@
-import type { FleetManager, WorkspaceEntry } from "./manager.js";
-import type { MessageSender } from "./types.js";
+import type { FleetManager } from "./manager.js";
+import type { MessageSender, WorkspaceEntry } from "./types.js";
 
 const FLEET_MARKER_REGEX = /\[FLEET:(\w+):(.*?)\]/g;
 const DISPATCHER_NAME = "_dispatcher";

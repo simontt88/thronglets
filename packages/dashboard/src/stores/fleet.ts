@@ -115,7 +115,16 @@ export const useFleetStore = create<FleetStore>((set, get) => ({
     document.body.className = theme === "dark" ? "theme-dark" : "";
     set({ theme });
   },
-  setWorkspace: (ws) => set({ currentWorkspace: ws }),
+  setWorkspace: (ws) => {
+    const { agents } = get();
+    const filtered = ws === "all" ? agents : agents.filter((a) => a.workspace === ws);
+    const first = filtered.find((a) => a.name !== "_dispatcher");
+    set({
+      currentWorkspace: ws,
+      activeAgent: first?.name || "",
+      selectedAgent: first?.name || null,
+    });
+  },
   setCols: (cols) => set({ cols: Math.max(2, Math.min(5, cols)) }),
   toggleDispatcher: () => set((s) => ({ dispatcherOpen: !s.dispatcherOpen })),
   selectAgent: (name) => set({ selectedAgent: name }),

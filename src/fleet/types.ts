@@ -57,3 +57,8 @@ export interface QueuedMessage {
   resolve: (reply: string) => void;
   reject: (err: Error) => void;
 }
+
+export interface WorkspaceEntry {
+  alias: string;
+  path: string;
+}

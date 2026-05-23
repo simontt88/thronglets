@@ -1,5 +1,5 @@
-import type { FleetManager, WorkspaceEntry } from "./manager.js";
-import type { FleetEventBus } from "./manager.js";
+import type { FleetManager, FleetEventBus } from "./manager.js";
+import type { WorkspaceEntry } from "./types.js";
 import type { BridgeConfig, RuntimeType } from "../config.js";
 import { provisionDispatcherWorkspace } from "./workspace-init.js";
 
