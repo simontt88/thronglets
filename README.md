@@ -94,34 +94,9 @@ Open Telegram → `/new` → watch your first thronglet hatch.
 
 ## How It Works
 
-```
-                   ┌─────────────────────────────────┐
-                   │         Your Telegram Chat       │
-                   │  "fix the tests"                 │
-                   └────────────┬────────────────────┘
-                                │
-                   ┌────────────▼────────────────────┐
-                   │       Thronglets Server          │
-                   │                                  │
-                   │  ┌──────────────────────────┐   │
-                   │  │   Orix (Dispatcher)       │   │
-                   │  │   own workspace + goal    │   │
-                   │  │   sees entire fleet state  │   │
-                   │  │   routes by ws + runtime   │   │
-                   │  └──────────┬───────────────┘   │
-                   │        fleet_send               │
-                   │  ┌──────┬──┴──┬──────┐          │
-                   │  │ Vexo │Kilo │ Paxi │ ...      │
-                   │  │cursor│codex│claude│          │
-                   │  │ /app │/api │/docs │          │
-                   │  └──┬───┴──┬──┴──┬───┘          │
-                   │     │      │     │               │
-                   │  ┌──▼──────▼─────▼──┐           │
-                   │  │  Web Dashboard    │           │
-                   │  │  (live via WS)    │           │
-                   │  └──────────────────┘           │
-                   └─────────────────────────────────┘
-```
+<p align="center">
+  <img src="docs/assets/architecture.svg" alt="Thronglets architecture — Telegram → Dispatcher → Fleet → Dashboard" width="600" />
+</p>
 
 The **dispatcher** is itself an agent (named Orix) with its own workspace. It receives every unaddressed message, sees the full fleet status (who's idle, who's working, which workspace each agent is in), and forwards tasks using `fleet_send`. It maintains a persistent goal — `/poke` it and it proactively assigns work to idle thronglets.
 

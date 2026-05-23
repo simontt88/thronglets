@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 520" font-family="ui-monospace, 'JetBrains Mono', 'Cascadia Code', monospace" font-size="13">
+  <style>
+    rect.box { fill: #1a1e34; stroke: #4a5080; stroke-width: 1.5; rx: 10; }
+    rect.dispatcher { fill: #2a1e3e; stroke: #7c6af7; stroke-width: 2; rx: 10; }
+    rect.agent { fill: #1e2a1e; stroke: #5e9e3e; stroke-width: 1.5; rx: 8; }
+    rect.dashboard { fill: #1e2434; stroke: #4eb3e6; stroke-width: 1.5; rx: 10; }
+    text { fill: #e0e4f8; }
+    text.title { font-weight: 700; font-size: 15px; fill: #fff; }
+    text.subtitle { font-size: 11px; fill: #8e94b0; }
+    text.label { font-size: 11px; fill: #a0a8c8; font-weight: 600; }
+    text.accent { fill: #f3c33a; font-weight: 700; }
+    text.purple { fill: #b89cd8; }
+    text.green { fill: #9fd97a; }
+    text.blue { fill: #7eb3e8; }
+    line.arrow { stroke: #4a5080; stroke-width: 1.5; }
+    polygon.arrowhead { fill: #4a5080; }
+    line.purple-arrow { stroke: #7c6af7; stroke-width: 2; }
+    polygon.purple-head { fill: #7c6af7; }
+  </style>
+
+  <!-- Background -->
+  <rect width="600" height="520" fill="#0e1018" rx="12" />
+
+  <!-- Telegram Chat -->
+  <rect class="box" x="160" y="20" width="280" height="60" />
+  <text class="title" x="300" y="45" text-anchor="middle">Your Telegram Chat</text>
+  <text class="subtitle" x="300" y="62" text-anchor="middle">"fix the tests"</text>
+
+  <!-- Arrow down -->
+  <line class="arrow" x1="300" y1="80" x2="300" y2="110" />
+  <polygon class="arrowhead" points="294,108 306,108 300,116" />
+
+  <!-- Server container -->
+  <rect x="40" y="118" width="520" height="380" fill="none" stroke="#2a3050" stroke-width="1" rx="12" stroke-dasharray="6,4" />
+  <text class="label" x="56" y="136">Thronglets Server</text>
+
+  <!-- Dispatcher -->
+  <rect class="dispatcher" x="150" y="148" width="300" height="90" />
+  <text class="purple" x="300" y="172" text-anchor="middle" font-size="15" font-weight="700">Orix (Dispatcher)</text>
+  <text class="subtitle" x="300" y="190" text-anchor="middle">own workspace &middot; persistent goal</text>
+  <text class="subtitle" x="300" y="206" text-anchor="middle">sees fleet state &middot; routes by workspace + runtime</text>
+  <text class="subtitle" x="300" y="222" text-anchor="middle">/poke &rarr; autonomously assigns idle agents</text>
+
+  <!-- fleet_send label -->
+  <text class="label" x="300" y="258" text-anchor="middle" fill="#7c6af7">fleet_send</text>
+
+  <!-- Arrow from dispatcher to agents -->
+  <line class="purple-arrow" x1="220" y1="238" x2="140" y2="285" />
+  <polygon class="purple-head" points="135,280 145,280 140,288" />
+  <line class="purple-arrow" x1="300" y1="238" x2="300" y2="285" />
+  <polygon class="purple-head" points="294,283 306,283 300,291" />
+  <line class="purple-arrow" x1="380" y1="238" x2="460" y2="285" />
+  <polygon class="purple-head" points="455,280 465,280 460,288" />
+
+  <!-- Agent: Vexo -->
+  <rect class="agent" x="70" y="290" width="130" height="80" />
+  <text class="accent" x="135" y="314" text-anchor="middle">Vexo</text>
+  <text class="green" x="135" y="332" text-anchor="middle" font-size="11">cursor</text>
+  <text class="subtitle" x="135" y="350" text-anchor="middle" font-size="11">workspace: /app</text>
+
+  <!-- Agent: Kilo -->
+  <rect class="agent" x="235" y="290" width="130" height="80" />
+  <text class="accent" x="300" y="314" text-anchor="middle">Kilo</text>
+  <text class="green" x="300" y="332" text-anchor="middle" font-size="11">codex</text>
+  <text class="subtitle" x="300" y="350" text-anchor="middle" font-size="11">workspace: /api</text>
+
+  <!-- Agent: Paxi -->
+  <rect class="agent" x="400" y="290" width="130" height="80" />
+  <text class="accent" x="465" y="314" text-anchor="middle">Paxi</text>
+  <text class="green" x="465" y="332" text-anchor="middle" font-size="11">claude</text>
+  <text class="subtitle" x="465" y="350" text-anchor="middle" font-size="11">workspace: /docs</text>
+
+  <!-- Dots for more agents -->
+  <text x="545" y="335" fill="#4a5080" font-size="20">...</text>
+
+  <!-- Arrows to dashboard -->
+  <line class="arrow" x1="135" y1="370" x2="220" y2="420" />
+  <line class="arrow" x1="300" y1="370" x2="300" y2="420" />
+  <line class="arrow" x1="465" y1="370" x2="380" y2="420" />
+
+  <!-- Dashboard -->
+  <rect class="dashboard" x="160" y="420" width="280" height="55" />
+  <text class="blue" x="300" y="445" text-anchor="middle" font-weight="700" font-size="14">Web Dashboard</text>
+  <text class="subtitle" x="300" y="462" text-anchor="middle">real-time via WebSocket</text>
+</svg>
