@@ -25,6 +25,7 @@ export class FleetEventBus extends EventEmitter {
   }
 }
 
+const SESSION_MAX_AGE_MS = 30 * 60 * 1000; // Close sessions idle for >30 minutes
 const TRAITS = ["curious", "sleepy", "eager", "chaotic", "calm", "skeptical"] as const;
 const ADJECTIVES = ["playful", "intense", "gentle", "wild", "stoic", "witty", "shy", "bold"] as const;
 
@@ -65,6 +66,7 @@ const SEND_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes max per message
 const HEALTH_CHECK_INTERVAL_MS = 30 * 1000; // check every 30s
 
 export type ReplyRoutingCallback = (fromAgent: string, toAgent: string, reply: string) => void;
+export type PeerMessageCallback = (fromAgent: string, toAgent: string, direction: "sent" | "replied") => void;
 
 export class FleetManager {
   private agents = new Map<string, LiveAgent>();
@@ -73,6 +75,7 @@ export class FleetManager {
   private healthInterval: ReturnType<typeof setInterval> | null = null;
   private postReplyHook: ((agentName: string, reply: string, sender: MessageSender) => Promise<string>) | null = null;
   private replyRoutingCallback: ReplyRoutingCallback | null = null;
+  private peerMessageCallback: PeerMessageCallback | null = null;
 
   constructor(bus: FleetEventBus, config: FleetManagerConfig) {
     this.bus = bus;
@@ -86,6 +89,10 @@ export class FleetManager {
 
   onReplyRouted(callback: ReplyRoutingCallback): void {
     this.replyRoutingCallback = callback;
+  }
+
+  onPeerMessage(callback: PeerMessageCallback): void {
+    this.peerMessageCallback = callback;
   }
 
   private startHealthCheck(): void {
@@ -258,6 +265,11 @@ export class FleetManager {
       return `Agent "${name}" not found. Use /new to spawn.`;
     }
 
+    // Notify about peer-to-peer messages (not user→agent)
+    if (sender !== "user" && this.peerMessageCallback) {
+      this.peerMessageCallback(sender as string, name, "sent");
+    }
+
     // If agent is currently processing, queue the message
     if (live.processing) {
       return new Promise((resolve, reject) => {
@@ -270,7 +282,7 @@ export class FleetManager {
   }
 
   private async processMessage(name: string, live: LiveAgent, text: string, sender: MessageSender): Promise<string> {
-    // Auto-recover from dead/error
+    // Auto-recover from dead/error — close stale session so a fresh one is created
     if (live.state.status === "dead" || live.state.status === "error") {
       console.log(`[fleet] ${name}: recovering from ${live.state.status} — creating fresh session`);
       if (live.session) {
@@ -278,6 +290,17 @@ export class FleetManager {
         live.session = null;
       }
       live.state.status = "idle";
+    }
+
+    // Proactive staleness check: if session has been idle too long, close it
+    // to avoid "empty response" errors from stale Cursor SDK connections
+    if (live.session && live.state.lastActivity) {
+      const idleMs = Date.now() - new Date(live.state.lastActivity).getTime();
+      if (idleMs > SESSION_MAX_AGE_MS) {
+        console.log(`[fleet] ${name}: session idle for ${Math.round(idleMs / 60_000)}min — proactively closing`);
+        try { live.session.close(); } catch {}
+        live.session = null;
+      }
     }
 
     live.processing = true;
@@ -293,7 +316,7 @@ export class FleetManager {
     this.bus.publish("user_message", name, live.sessionId, { text: taggedText, sender });
     this.logToSession(name, live.sessionId, { type: "user_message", text: taggedText, sender });
 
-    const attemptSend = async (isRetry: boolean): Promise<string> => {
+    const attemptSend = async (): Promise<string> => {
       const isNewSession = !live.session;
       if (isNewSession) {
         live.session = await this.withTimeout(
@@ -318,43 +341,63 @@ export class FleetManager {
       );
     };
 
+    const closeSession = () => {
+      if (live.session) {
+        try { live.session.close(); } catch {}
+        live.session = null;
+      }
+    };
+
     try {
       let reply: string;
-      try {
-        reply = await attemptSend(false);
-      } catch (firstErr) {
-        const firstMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
-        const isTimeout = firstMsg.includes("Timeout");
-        console.log(`[fleet] ${name}: send failed (${isTimeout ? "TIMEOUT" : "error"}), retrying with fresh session...`);
-        if (live.session) {
-          try { live.session.close(); } catch {}
-          live.session = null;
+      let lastErr: Error | null = null;
+
+      // Retry up to 2 times (initial + 1 retry with fresh session)
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          reply = await attemptSend();
+          lastErr = null;
+          break;
+        } catch (err) {
+          lastErr = err instanceof Error ? err : new Error(String(err));
+          const isTimeout = lastErr.message.includes("Timeout");
+          console.log(`[fleet] ${name}: attempt ${attempt + 1} failed (${isTimeout ? "TIMEOUT" : lastErr.message.slice(0, 80)})`);
+          closeSession();
+
+          if (isTimeout) {
+            live.state.status = "dead";
+            live.state.inferred = `send timed out after ${SEND_TIMEOUT_MS / 60_000}min — session closed`;
+            this.bus.publish("status_change", name, live.sessionId, { status: "dead" });
+            this.logToSession(name, live.sessionId, { type: "timeout", error: lastErr.message });
+            this.persistState();
+            this.finishProcessing(name, live);
+            return `⚠️ Agent "${name}" timed out (${SEND_TIMEOUT_MS / 60_000}min). Session closed. Send another message to auto-recover.`;
+          }
+
+          if (attempt === 0) {
+            console.log(`[fleet] ${name}: retrying with fresh session...`);
+          }
         }
-        if (isTimeout) {
-          live.state.status = "dead";
-          live.state.inferred = `send timed out after ${SEND_TIMEOUT_MS / 60_000}min — session closed`;
-          this.bus.publish("status_change", name, live.sessionId, { status: "dead" });
-          this.logToSession(name, live.sessionId, { type: "timeout", error: firstMsg });
-          this.persistState();
-          this.finishProcessing(name, live);
-          return `⚠️ Agent "${name}" timed out (${SEND_TIMEOUT_MS / 60_000}min). Session closed. Send another message to auto-recover.`;
-        }
-        reply = await attemptSend(true);
+      }
+
+      // Both attempts failed
+      if (lastErr) {
+        throw lastErr;
       }
 
       // Run post-reply hook (fleet tool execution)
       if (this.postReplyHook) {
-        reply = await this.postReplyHook(name, reply, sender);
+        reply = await this.postReplyHook(name, reply!, sender);
       }
 
       live.state.messageCount++;
       live.state.status = "idle";
       live.state.inferred = "idle — waiting for input";
       live.state.lastActivity = new Date().toISOString();
-      live.state.lastAgentMessage = reply;
-      this.bus.publish("agent_message", name, live.sessionId, { text: reply, sender });
+      live.state.lastAgentMessage = reply!;
+      this.bus.publish("agent_message", name, live.sessionId, { text: reply!, sender });
       this.bus.publish("status_change", name, live.sessionId, { status: "idle" });
-      this.logToSession(name, live.sessionId, { type: "agent_message", text: reply, replyTo: sender });
+      this.logToSession(name, live.sessionId, { type: "agent_message", text: reply!, replyTo: sender });
       this.persistState();
 
       if (!live.state.sessionName) {
@@ -363,11 +406,11 @@ export class FleetManager {
 
       // Reply routing: if message was from another agent, route reply back
       if (sender !== "user") {
-        this.routeReplyToSender(name, sender, reply);
+        this.routeReplyToSender(name, sender, reply!);
       }
 
       this.finishProcessing(name, live);
-      return reply;
+      return reply!;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       const isTimeout = errMsg.includes("Timeout");
@@ -380,16 +423,19 @@ export class FleetManager {
       this.logToSession(name, live.sessionId, { type: isTimeout ? "timeout" : "error", error: errMsg });
       this.persistState();
 
-      if (live.session) {
-        try { live.session.close(); } catch {}
-        live.session = null;
-      }
+      closeSession();
 
-      // Forward error to dispatcher so it can react (reassign, restart, etc.)
-      if (name !== "_dispatcher" && this.agents.has("_dispatcher")) {
-        const briefErr = errMsg.length > 200 ? errMsg.slice(0, 200) + "…" : errMsg;
-        this.send("_dispatcher", `Agent "${name}" encountered an error: ${briefErr}\nStatus: ${live.state.status}. Please advise or reassign the task.`, name)
-          .catch((e) => console.warn(`[fleet] failed to notify dispatcher of ${name} error: ${(e as Error).message?.slice(0, 60)}`));
+      // Forward error to dispatcher — but ONLY if dispatcher is healthy
+      // Avoids cascading failure when dispatcher itself is down
+      if (name !== "_dispatcher") {
+        const dispLive = this.agents.get("_dispatcher");
+        if (dispLive && dispLive.state.status !== "error" && dispLive.state.status !== "dead") {
+          const briefErr = errMsg.length > 200 ? errMsg.slice(0, 200) + "…" : errMsg;
+          this.send("_dispatcher", `Agent "${name}" encountered an error: ${briefErr}\nStatus: ${live.state.status}. Please advise or reassign the task.`, name)
+            .catch((e) => console.warn(`[fleet] failed to notify dispatcher of ${name} error: ${(e as Error).message?.slice(0, 60)}`));
+        } else {
+          console.warn(`[fleet] ${name}: error occurred but dispatcher is ${dispLive?.state.status ?? "absent"} — skipping error forwarding`);
+        }
       }
 
       this.finishProcessing(name, live);
@@ -398,7 +444,9 @@ export class FleetManager {
         return `⚠️ Agent "${name}" timed out. Session closed. Send another message to auto-recover.`;
       }
 
-      throw err;
+      // Return error message instead of throwing — prevents unhandled rejections
+      // from cascading through the message queue
+      return `⚠️ Agent "${name}" error: ${errMsg.slice(0, 200)}`;
     }
   }
 
@@ -416,9 +464,14 @@ export class FleetManager {
       text: reply,
     });
 
-    // Notify via callback (Telegram notification)
+    // Notify via callback (Telegram notification — content)
     if (this.replyRoutingCallback) {
       this.replyRoutingCallback(fromAgent, toAgent, reply);
+    }
+
+    // Notify peer message event (metadata only, no content)
+    if (this.peerMessageCallback) {
+      this.peerMessageCallback(fromAgent, toAgent, "replied");
     }
 
     console.log(`[fleet] reply routed: ${fromAgent} → ${toAgent} (${reply.length} chars)`);

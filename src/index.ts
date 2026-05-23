@@ -166,6 +166,14 @@ async function main() {
   // Track last active chat for user-facing replies
   let notifyChatId: string | null = null;
 
+  // Notify Telegram about inter-agent messages (metadata only, not content)
+  fleet.onPeerMessage((from, to, direction) => {
+    if (!notifyChatId) return;
+    const arrow = direction === "sent" ? "→" : "←";
+    const label = direction === "sent" ? "📤" : "📥";
+    transport.sendReply(notifyChatId, `${label} ${from} ${arrow} ${to}`).catch(() => {});
+  });
+
   // Start dispatcher (if enabled in config)
   const dispatcherConfig = getDispatcherConfig(config);
   await startDispatcher(fleet, bus, config, workspaces);
@@ -290,20 +298,26 @@ async function main() {
             await transport.sendReply(chatId, "No thronglets running.\nHatch one: /new [runtime] [workspace]");
             return;
           }
-          const lines = thronglets.map((a) => {
-            const dot = a.status === "working" ? "🟢"
-              : a.status === "error" ? "🔴"
-              : a.status === "dead" ? "💀"
-              : a.status === "idle" ? "⚪"
-              : "⚫";
-            const titleStr = a.title ? ` — ${a.title}` : "";
-            const ago = timeSince(a.lastActivity);
-            const activity = a.inferred && a.status === "working"
-              ? a.inferred.replace("processing message from ", "← ")
-              : a.sessionName || "";
-            const actStr = activity ? `  _${activity}_` : "";
-            return `${dot} *${a.name}*${titleStr}\n    ${a.runtime} · ${a.workspace} · ${ago}${actStr}`;
-          });
+
+          const statusEmoji = (s: string) =>
+            s === "working" ? "🔨" : s === "idle" ? "💤" : s === "dead" ? "☠️" : s === "error" ? "❌" : "⚫";
+
+          const grouped = new Map<string, typeof thronglets>();
+          for (const a of thronglets) {
+            const key = a.workspace;
+            if (!grouped.has(key)) grouped.set(key, []);
+            grouped.get(key)!.push(a);
+          }
+
+          const sections: string[] = [];
+          for (const [alias, agents] of grouped) {
+            const dirName = agents[0].workspacePath.split("/").pop() || alias;
+            const agentLines = agents.map((a) => {
+              const titleStr = a.title ? ` — ${a.title}` : "";
+              return `  ${statusEmoji(a.status)} @${a.name}${titleStr}`;
+            }).join("\n");
+            sections.push(`📁 *${alias}* (${dirName})\n${agentLines}`);
+          }
 
           const working = thronglets.filter((a) => a.status === "working").length;
           const idle = thronglets.filter((a) => a.status === "idle").length;
@@ -319,7 +333,7 @@ async function main() {
             : "\n⚠️ Dispatcher: offline";
 
           const header = `Fleet: ${thronglets.length} thronglets (${parts.join(", ")})`;
-          await transport.sendReply(chatId, `${header}\n\n${lines.join("\n\n")}${dispLine}`);
+          await transport.sendReply(chatId, `${header}\n\n${sections.join("\n\n")}${dispLine}`);
           return;
         }
 
@@ -551,21 +565,32 @@ async function main() {
   console.log(`\n  Commands: /new /kill /fleet /clear /change /status /help`);
   console.log(`  Mention:  @name message | @all message\n`);
 
+  let dispatcherRecovering = false;
   setInterval(async () => {
     const s = fleet.getStatus();
     console.log(`[heartbeat] ${new Date().toISOString()} fleet=${s.total} working=${s.working} dead=${s.dead}`);
 
-    // Auto-recover dispatcher if it died
-    if (dispatcherConfig.enabled) {
+    // Auto-recover dispatcher if it died (with guard against concurrent recovery)
+    if (dispatcherConfig.enabled && !dispatcherRecovering) {
       const disp = fleet.getAgent(DISPATCHER_AGENT_NAME);
       if (!disp || disp.status === "dead" || disp.status === "error") {
+        dispatcherRecovering = true;
         console.log(`[heartbeat] dispatcher is ${disp?.status ?? "gone"} — auto-recovering...`);
-        if (disp) await fleet.kill(DISPATCHER_AGENT_NAME);
-        const ok = await startDispatcher(fleet, bus, config, workspaces);
-        console.log(`[heartbeat] dispatcher recovery: ${ok ? "success" : "failed"}`);
+        try {
+          if (disp) await fleet.kill(DISPATCHER_AGENT_NAME);
+          const ok = await startDispatcher(fleet, bus, config, workspaces);
+          console.log(`[heartbeat] dispatcher recovery: ${ok ? "success" : "failed"}`);
+          if (ok && notifyChatId) {
+            transport.sendReply(notifyChatId, "🔄 Dispatcher auto-recovered from crash").catch(() => {});
+          }
+        } catch (e) {
+          console.error(`[heartbeat] dispatcher recovery failed: ${e instanceof Error ? e.message : e}`);
+        } finally {
+          dispatcherRecovering = false;
+        }
       }
     }
-  }, 5 * 60 * 1000);
+  }, 2 * 60 * 1000);
 }
 
 function timeSince(isoStr: string): string {

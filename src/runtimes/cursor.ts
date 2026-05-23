@@ -31,10 +31,16 @@ class CursorSession implements AgentSession {
 
   async send(text: string): Promise<string> {
     if (!this.alive) {
-      throw new Error("Session already closed — create a new one");
+      throw new Error("Session closed — create a new one");
     }
 
-    const run = await this.agent.send(text);
+    let run: SDKRun;
+    try {
+      run = await this.agent.send(text);
+    } catch (sendErr) {
+      this.alive = false;
+      throw new Error(`Cursor SDK send() failed (session likely stale): ${sendErr instanceof Error ? sendErr.message : sendErr}`);
+    }
 
     const result = await Promise.race([
       run.wait(),
