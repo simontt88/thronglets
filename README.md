@@ -1,5 +1,4 @@
 <p align="center">
-  <!-- Replace with actual screenshot once captured -->
   <img src="docs/assets/hero-dashboard.png" alt="Thronglets Dashboard — pixel art agents working in your codebase" width="720" />
 </p>
 
@@ -28,20 +27,15 @@
 
 ---
 
-## Why Thronglets?
+## Why "Thronglets"?
 
-Most AI agent setups give you one agent, one chat window, one context. You alt-tab between your IDE and your messaging app, losing focus.
+The name is from *Black Mirror* — digital creatures with personalities inside a simulation. The connection to multi-agent orchestration is loose at best. But the name stuck.
 
-**Thronglets turns your Telegram group into a fleet command center.** Spawn coding agents on demand — each gets a procedurally generated name (Vexo, Kilo, Paxi...), a unique pixel art avatar with moods, and a dedicated workspace. Route tasks by mentioning an agent or let the AI dispatcher pick the best one. Watch them work in a real-time web dashboard.
+The real idea: your most powerful agent already exists — it's your Cursor session, your Claude Code terminal, sitting in your workspace. It knows your codebase, your conventions, your half-finished TODOs. It just never leaves the room.
 
-```
-You:        @Vexo refactor the auth module
-Vexo:       On it — restructuring into middleware pattern...
+Thronglets is the missing step. Give each agent a name, a face, a mood. Connect them. Your workspace **is** the harness — all you add is a dispatcher and a message bus. One agent refactors, another reviews, a third writes tests. You watch pixel creatures grind from a Telegram chat while you're on the bus.
 
-You:        fix the CI pipeline  (no @mention → dispatcher routes it)
-Dispatcher: Routing to Kilo (idle, assigned to infra workspace)
-Kilo:       Found the issue — Node 18 assertion, fixing...
-```
+Not a new AI framework. Just identity and coordination on top of tools you already use.
 
 > **One command. Multiple agents. Multiple runtimes. One chat.**
 
@@ -70,11 +64,9 @@ Open Telegram → `/new` → watch your first thronglet hatch.
 
 ## See It In Action
 
-<!-- Replace these with actual GIF/screenshots once captured -->
-
-| Spawn from Telegram | Dashboard with fleet | Smart dispatcher routing |
-|:---:|:---:|:---:|
-| <img src="docs/assets/demo-spawn.gif" alt="Spawning a thronglet" width="240" /> | <img src="docs/assets/demo-dashboard.png" alt="Web dashboard" width="240" /> | <img src="docs/assets/demo-dispatch.gif" alt="Dispatcher routing" width="240" /> |
+| Spawn from Telegram | Agent at work |
+|:---:|:---:|
+| <img src="docs/assets/demo-spawn.png" alt="Spawning a thronglet from Telegram" width="280" /> | <img src="docs/assets/demo-dashboard.png" alt="Thronglet working on tasks" width="420" /> |
 
 ## Features
 
