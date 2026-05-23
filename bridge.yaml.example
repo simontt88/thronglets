@@ -1,19 +1,21 @@
 transport: telegram
-runtime: cursor
 
 telegram:
   token: ${TELEGRAM_BOT_TOKEN}
   allowed_chats:
-    - "your-chat-id"
+    - "your-chat-id"    # Get via: send /start to @userinfobot on Telegram
 
-cursor:
-  api_key: ${CURSOR_API_KEY}
-  model: claude-opus-4-6
+agents:
+  - name: default
+    runtime: cursor
+    api_key: ${CURSOR_API_KEY}  # Get from: https://cursor.com/settings
+    model: claude-sonnet-4-6
+
+# Dispatcher: AI-powered message router that manages the fleet
+dispatcher:
+  enabled: true
+  # workspace: dispatch  # auto-created under ~/.thronglets/dispatch
 
 # Optional: local conversation logs
 session:
   log_dir: ~/.thronglets/logs
-
-  # Optional: sync conversations to a recall API
-  # recall_api: https://your-api/api/sync/ingest
-  # recall_key: ${YOUR_API_KEY}

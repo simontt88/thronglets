@@ -67,6 +67,19 @@ export function startServer(
       res.sendFile(join(dashDir, "index.html"));
     });
     console.log(`[server] Dashboard: serving from ${dashDir}`);
+  } else {
+    // Dashboard not built — serve a helpful fallback page
+    app.get("/", (_req, res) => {
+      res.send(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Thronglets</title>
+<style>body{font-family:system-ui;max-width:600px;margin:80px auto;padding:0 20px;color:#333}
+code{background:#f1f5f9;padding:2px 6px;border-radius:4px;font-size:0.9em}
+pre{background:#f1f5f9;padding:16px;border-radius:8px;overflow-x:auto}</style></head>
+<body><h1>Thronglets</h1><p>The API is running but the dashboard hasn't been built yet.</p>
+<pre>cd packages/dashboard\nnpm install\nnpm run build</pre>
+<p>Then restart the service. Or use <strong>Telegram</strong> to interact with the fleet.</p>
+<p><a href="/health">API Health</a> · <a href="/api/fleet">Fleet Status</a></p></body></html>`);
+    });
+    console.log("[server] Dashboard: not built — serving fallback page. Run: cd packages/dashboard && npm install && npm run build");
   }
 
   const server = createServer(app);
