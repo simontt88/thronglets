@@ -4,7 +4,7 @@
   "description": "Thronglets — multi-agent fleet orchestrator for Telegram/Lark/Discord with Cursor, Claude Code, and Codex",
   "type": "module",
   "bin": {
-    "thronglets": "./bin/kenyalang.js"
+    "thronglets": "./bin/thronglets.js"
   },
   "scripts": {
     "start": "node --import tsx src/index.ts",

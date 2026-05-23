@@ -22,7 +22,7 @@ export function createHttpApp(
 
   app.use((_req, res, next) => {
     res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
     res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
     if (_req.method === "OPTIONS") { res.sendStatus(204); return; }
     next();
@@ -203,11 +203,27 @@ export function createHttpApp(
   });
 
   app.delete("/api/workspaces/:alias", (req, res) => {
-    const result = removeWorkspace(req.params.alias);
+    const alias = req.params.alias;
+    const status = fleet.getStatus();
+    const occupants = status.agents.filter((a: any) => a.workspace === alias);
+    if (occupants.length > 0) {
+      res.status(409).json({
+        error: `Cannot delete workspace "${alias}" — ${occupants.length} thronglet(s) still inside: ${occupants.map((a: any) => a.name).join(", ")}. Kill them first.`,
+        agents: occupants.map((a: any) => a.name),
+      });
+      return;
+    }
+    const result = removeWorkspace(alias);
     const updated = loadWorkspaces();
     workspaces.length = 0;
     workspaces.push(...updated);
     res.json({ message: result, workspaces: updated });
+  });
+
+  app.post("/api/agents/:name/title", (req, res) => {
+    const { title } = req.body;
+    const result = fleet.setTitle(req.params.name, title || "");
+    res.json({ message: result });
   });
 
   return app;

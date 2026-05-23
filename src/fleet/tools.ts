@@ -38,7 +38,7 @@ const TOOLS: Record<string, ToolDef> = {
     async execute(_args, _agentName, fleet, workspaces) {
       const status = fleet.getStatus();
       const agentLines = status.agents.map((a) =>
-        `  @${a.name}: ${a.runtime} · ${a.workspace} · ${a.status}${a.sessionName ? ` 「${a.sessionName}」` : ""}`
+        `  @${a.name}${a.title ? ` (${a.title})` : ""}: ${a.runtime} · ${a.workspace} · ${a.status}${a.sessionName ? ` 「${a.sessionName}」` : ""}`
       ).join("\n");
       const wsLines = workspaces.map((w) => `  ${w.alias}: ${w.path}`).join("\n");
       return `Fleet: ${status.total} agents (${status.working} working, ${status.idle} idle, ${status.dead} dead)\n${agentLines}\n\nWorkspaces:\n${wsLines}`;
@@ -93,6 +93,17 @@ const TOOLS: Record<string, ToolDef> = {
     async execute(_args, _agentName, fleet, workspaces) {
       const lines = workspaces.map((w) => `  ${w.alias}: ${w.path}`).join("\n");
       return `Workspaces:\n${lines}`;
+    },
+  },
+
+  fleet_set_title: {
+    permission: "dispatcher",
+    async execute(args, _agentName, fleet) {
+      const name = args.name as string;
+      const title = args.title as string;
+      if (!name || !title) return "Error: fleet_set_title requires 'name' and 'title'";
+      const result = fleet.setTitle(name, title);
+      return result;
     },
   },
 };

@@ -4,3 +4,5 @@ logs/
 bridge.yaml
 .env
 *.log
+.cursor/rules/v2/
+.cursor/commands/

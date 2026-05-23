@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { useFleetStore, addWorkspace, deleteWorkspace } from "../stores/fleet";
+import { useFleetStore, addWorkspace } from "../stores/fleet";
 import { Icon } from "./Icons";
 
 export function WorkspaceHeader() {
-  const { agents, workspaces, currentWorkspace, cols, setCols, setSpawnDialogOpen, setWorkspace } = useFleetStore();
+  const { agents, workspaces, currentWorkspace, cols, setCols, setSpawnDialogOpen } = useFleetStore();
   const [showAddWs, setShowAddWs] = useState(false);
   const [wsAlias, setWsAlias] = useState("");
   const [wsPath, setWsPath] = useState("");
@@ -26,19 +26,10 @@ export function WorkspaceHeader() {
     setShowAddWs(false);
   };
 
-  const handleDeleteWs = async () => {
-    if (currentWorkspace === "all") return;
-    if (!confirm(`Remove workspace "${currentWorkspace}"?`)) return;
-    await deleteWorkspace(currentWorkspace);
-    setWorkspace("all");
-  };
-
   return (
     <div className="ws-header">
       <div className="h-block">
         <div className="crumb">
-          <span>habitat</span>
-          <span className="sep">/</span>
           <span>{title.toUpperCase()}</span>
         </div>
         <div className="h-title">
@@ -69,13 +60,8 @@ export function WorkspaceHeader() {
         <div className="tb-group">
           <button className="tb-btn" onClick={() => setShowAddWs(true)}>
             <Icon name="plus" size={12} />
-            <span>Workspace</span>
+            <span>Add Workspace</span>
           </button>
-          {currentWorkspace !== "all" && (
-            <button className="tb-btn danger" onClick={handleDeleteWs} title={`Remove workspace "${currentWorkspace}"`}>
-              <Icon name="x" size={12} />
-            </button>
-          )}
         </div>
       </div>
 

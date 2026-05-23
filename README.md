@@ -1,25 +1,26 @@
-# Kenyalang
+# Thronglets
 
-Bridge your local workspace's full Cursor-like agent capabilities to any messaging platform.
+Multi-agent fleet system connecting AI coding agents to messaging platforms.
 
 ```
-git clone → configure → npm start → your Telegram/Lark/Slack IS your local Cursor
+git clone → configure → npm start → your Telegram/Lark/Discord IS your fleet command center
 ```
 
 ## What This Does
 
-Takes any directory on your machine and makes it accessible via a messaging bot with the **same capabilities** as opening Cursor IDE on that directory:
+Spawns and manages a fleet of **thronglets** — procedurally generated coding creatures, each with unique names, personalities, and pixel art avatars. Each thronglet runs in a workspace with full Cursor-like agent capabilities:
 
-- Reads `.cursor/rules/` and `AGENTS.md` (same context as IDE)
-- Full shell/file/git access in the workspace
-- Multi-turn conversation with agent context management
-- Local JSONL conversation logs + optional cloud recall sync
+- **Fleet management**: spawn, kill, send, clear agents across runtimes (Cursor, Claude Code, Codex)
+- **Smart dispatcher**: AI-powered message routing to the best available thronglet
+- **Web dashboard**: real-time fleet visualization with pixel art avatars
+- **Inter-agent communication**: message queuing and reply routing between thronglets
+- **Multi-platform**: Telegram, Lark, Discord transports
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/simontt88/kenyalang.git
-cd kenyalang
+git clone https://github.com/simontt88/thronglets.git
+cd thronglets
 npm install
 
 # Option A: env vars
@@ -29,101 +30,95 @@ export CURSOR_API_KEY="your-cursor-key"
 export BRIDGE_WORKSPACE="/path/to/your/project"
 npm start
 
-# Option B: bridge.yaml (see below)
+# Option B: config.yaml (see bridge.yaml.example)
 npm start
 ```
 
 ## Configuration
 
-Create `bridge.yaml` in the bridge directory:
+Create `config.yaml` in `~/.thronglets/` or set `THRONGLETS_HOME`:
 
 ```yaml
 transport: telegram
-runtime: cursor
-workspace: /path/to/your/project    # the directory you want the agent to work in
+workspace: /path/to/your/project
 
 telegram:
   token: ${TELEGRAM_BOT_TOKEN}
   allowed_chats:
     - "your-chat-id"
 
-cursor:
-  api_key: ${CURSOR_API_KEY}
-  model: claude-opus-4-6             # any model from Cursor SDK
+agents:
+  - name: cursor
+    runtime: cursor
+    api_key: ${CURSOR_API_KEY}
+    model: claude-sonnet-4-6
 
-session:
-  log_dir: ./logs
-  recall_api: https://your-recall-api/api/sync/ingest   # optional
-  recall_key: ${RECALL_API_KEY}                          # optional
-```
-
-`${VAR}` references are resolved from environment variables at startup.
-
-Or skip the yaml and use environment variables directly:
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `TELEGRAM_BOT_TOKEN` | yes | From @BotFather |
-| `TELEGRAM_ALLOWED_CHATS` | yes | Comma-separated chat IDs |
-| `CURSOR_API_KEY` | yes | From cursor.com/settings |
-| `BRIDGE_WORKSPACE` | no | Target workspace (default: cwd) |
-| `CURSOR_MODEL` | no | Model ID (default: claude-opus-4-6) |
-| `BRIDGE_LOG_DIR` | no | Log directory (default: ./logs) |
-
-## How It Works
-
-```
-User sends message via Telegram
-    ↓
-Transport adapter receives message
-    ↓
-Session manager routes to agent session (creates if needed)
-    ↓
-On first message: workspace context injected
-  - .cursor/rules/**/*.mdc
-  - AGENTS.md
-  - Directory tree
-    ↓
-Runtime adapter sends to Cursor SDK (local mode, cwd = workspace)
-    ↓
-Agent executes with full shell/file/git access
-    ↓
-Reply sent back through transport
-    ↓
-Message logged locally + synced to recall API
+dispatcher:
+  enabled: true
+  runtime: cursor
+  workspace: vs
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `/clear` | Reset agent session (memory preserved in logs/recall) |
-| `/status` | Show current session info |
+| `/new [name] [runtime] [workspace]` | Hatch a thronglet (auto-named if no name) |
+| `/kill <name>` | Release a thronglet |
+| `/fleet` | Show all thronglets + status |
+| `/status [name]` | Thronglet detail |
+| `/title <name> <title>` | Set thronglet title/role |
+| `/workspace [add alias path]` | List or add workspaces |
+| `/dispatcher [restart]` | Dispatcher status / restart |
+| `/clear <name>` | Archive session, fresh start |
+| `/change <name> <field> <value>` | Reconfigure runtime/model/workspace |
 | `/help` | List commands |
+
+### Messaging
+
+- `@name message` — send to a specific thronglet
+- `@D message` — route to dispatcher (also `@d`, `@orix`)
+- `@all message` — broadcast to all
+- Plain text — auto-routes via dispatcher
 
 ## Architecture
 
 ```
 src/
+├── fleet/            # Fleet management core
+│   ├── manager.ts    # Agent lifecycle, message routing, preamble injection
+│   ├── dispatcher.ts # Smart dispatcher setup
+│   ├── tools.ts      # [FLEET:...] marker-based fleet tools
+│   ├── event-bus.ts  # Real-time event pub/sub
+│   ├── state.ts      # Persistent fleet state (JSON + YAML)
+│   ├── naming.ts     # Procedural name generation
+│   └── types.ts      # TypeScript interfaces
 ├── transports/       # Messaging platform adapters
-│   ├── interface.ts  # Transport contract
-│   └── telegram.ts   # Telegram (long-polling)
+│   ├── telegram.ts   # Telegram (long-polling)
+│   ├── lark.ts       # Lark/Feishu
+│   └── discord.ts    # Discord
 ├── runtimes/         # Agent SDK backends
-│   ├── interface.ts  # Runtime contract
-│   └── cursor.ts     # @cursor/sdk local mode
-├── context/          # Workspace context injection
-│   ├── loader.ts     # Reads rules, AGENTS.md, tree
-│   └── injector.ts   # Formats init message
-├── session/          # Conversation management
-│   ├── manager.ts    # Per-chat sessions
-│   └── store.ts      # JSONL logs + recall sync
+│   ├── cursor.ts     # @cursor/sdk
+│   ├── claude-code.ts # Claude Code CLI
+│   └── codex.ts      # OpenAI Codex
+├── server/           # HTTP API + WebSocket
+│   └── http.ts       # REST endpoints + WS events
 ├── config.ts         # YAML + env var config
-└── index.ts          # Entrypoint
+├── rules-sync.ts     # .cursor/rules → .claude sync
+└── index.ts          # Entrypoint + command router
+
+packages/
+└── dashboard/        # Vite + React web UI
+    └── src/
+        ├── components/  # SessionCard, ChatBar, TopBar, SpawnDialog
+        ├── lib/
+        │   └── thronglet/  # Procedural pixel art generation
+        └── stores/      # Zustand state management
 ```
 
-## Adding a New Transport
+## Adding a Transport
 
-Implement the `Transport` interface:
+Implement the `Transport` interface in `src/transports/`:
 
 ```typescript
 interface Transport {
@@ -136,30 +131,13 @@ interface Transport {
 }
 ```
 
-Then add a case in `src/index.ts` `createTransport()`.
+## Adding a Runtime
 
-## Adding a New Runtime
-
-Implement the `Runtime` interface:
+Implement the `Runtime` interface in `src/runtimes/`:
 
 ```typescript
 interface Runtime {
   name: string;
-  createSession(opts: { cwd: string; model: string; context: string }): Promise<AgentSession>;
-}
-
-interface AgentSession {
-  send(text: string): Promise<string>;
-  close(): void;
+  createSession(opts: RuntimeSessionOptions): Promise<AgentSession>;
 }
 ```
-
-Then add a case in `src/index.ts` `createRuntime()`.
-
-## Key Design Decisions
-
-- **Workspace is external** — the bridge does NOT live inside the target workspace. It points at any directory.
-- **Context injection replicates IDE** — same `.cursor/rules/` loading that Cursor IDE does automatically.
-- **Transport-agnostic** — add Lark/Slack/Discord by implementing one interface.
-- **Runtime-agnostic** — add Claude SDK/Codex by implementing one interface.
-- **Won't affect other directories** — agent runs in `local` mode scoped to the configured workspace only.

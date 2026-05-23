@@ -1,13 +1,11 @@
 import TelegramBot from "node-telegram-bot-api";
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import type { Transport, IncomingMessage, TransportOptions } from "./interface.js";
-import { renderAvatarPNG } from "../fleet/render-avatar.js";
 
 const THRONGLETS_HOME = process.env.THRONGLETS_HOME || join(homedir(), ".thronglets");
 const PID_FILE = join(THRONGLETS_HOME, "bridge.pid");
-const AVATAR_FLAG = join(THRONGLETS_HOME, "bot-avatar-set");
 
 export interface TelegramConfig {
   token: string;
@@ -94,57 +92,17 @@ export class TelegramTransport implements Transport {
       { command: "start", description: "Welcome & setup info" },
       { command: "new", description: "Hatch a thronglet (auto-named)" },
       { command: "kill", description: "Release: /kill <name>" },
-      { command: "change", description: "Reconfigure: /change <name> model|workspace|runtime <val>" },
-      { command: "fleet", description: "List all thronglets + status" },
-      { command: "clear", description: "Reset session: /clear <name>" },
+      { command: "fleet", description: "Fleet status — all thronglets" },
+      { command: "dispatcher", description: "Dispatcher status / restart" },
       { command: "status", description: "Detail: /status <name>" },
+      { command: "title", description: "Set title: /title <name> <title>" },
+      { command: "workspace", description: "List or add: /workspace [add alias path]" },
+      { command: "change", description: "Reconfigure: /change <name> field <val>" },
+      { command: "clear", description: "Reset session: /clear <name>" },
       { command: "help", description: "Show all commands" },
     ]).catch(() => {});
 
-    // Set bot profile photo (once, on first startup)
-    this.setInitialAvatar().catch((err) => {
-      console.warn(`[telegram] avatar set failed: ${(err as Error).message?.slice(0, 80)}`);
-    });
-
     console.log(`[telegram] transport started`);
-  }
-
-  private async setInitialAvatar(): Promise<void> {
-    if (existsSync(AVATAR_FLAG)) return;
-    if (!this.bot) return;
-
-    const seed = `thronglet-bot-${Date.now()}`;
-    const png = renderAvatarPNG(seed);
-    mkdirSync(THRONGLETS_HOME, { recursive: true });
-    writeFileSync(join(THRONGLETS_HOME, "bot-avatar.png"), png);
-
-    try {
-      const url = `https://api.telegram.org/bot${this.config.token}/setMyProfilePhoto`;
-      const boundary = "----ThrongletsAvatar" + Date.now();
-      const photoJson = JSON.stringify({ type: "static", photo: "attach://photo_file" });
-      const body = Buffer.concat([
-        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="photo"\r\n\r\n${photoJson}\r\n`),
-        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="photo_file"; filename="avatar.png"\r\nContent-Type: image/png\r\n\r\n`),
-        png,
-        Buffer.from(`\r\n--${boundary}--\r\n`),
-      ]);
-
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": `multipart/form-data; boundary=${boundary}` },
-        body,
-      });
-
-      if (res.ok) {
-        writeFileSync(AVATAR_FLAG, seed);
-        console.log("[telegram] bot avatar set successfully");
-      } else {
-        const text = await res.text();
-        console.warn(`[telegram] avatar API returned ${res.status}: ${text.slice(0, 200)}`);
-      }
-    } catch (err) {
-      console.warn(`[telegram] avatar upload error: ${(err as Error).message?.slice(0, 80)}`);
-    }
   }
 
   async stop(): Promise<void> {

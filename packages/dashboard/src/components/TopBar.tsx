@@ -1,10 +1,13 @@
-import { useFleetStore } from "../stores/fleet";
+import { useState } from "react";
+import { useFleetStore, deleteWorkspace } from "../stores/fleet";
 import { Icon } from "./Icons";
 import { PixelThronglet } from "./PixelThronglet";
 import { generateThronglet } from "../lib/thronglet";
 
 export function TopBar() {
-  const { agents, workspaces, currentWorkspace, setWorkspace, dispatcherOpen, toggleDispatcher, theme, setTheme, setCommandBarOpen, setSpawnDialogOpen } = useFleetStore();
+  const { agents, workspaces, currentWorkspace, setWorkspace, theme, setTheme, setCommandBarOpen, setSpawnDialogOpen } = useFleetStore();
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState("");
 
   const wsGroups = [
     { alias: "all", name: "All", path: "", count: agents.length },
@@ -15,6 +18,17 @@ export function TopBar() {
       count: agents.filter((a) => a.workspace === ws.alias).length,
     })),
   ];
+
+  const handleDeleteWs = async (alias: string) => {
+    const result = await deleteWorkspace(alias);
+    if (!result.ok) {
+      setDeleteError(result.message);
+      return;
+    }
+    setConfirmDelete(null);
+    setDeleteError("");
+    if (currentWorkspace === alias) setWorkspace("all");
+  };
 
   return (
     <header className="topbar">
@@ -36,6 +50,17 @@ export function TopBar() {
             <span className="ws-dot" style={{ background: ws.alias === "all" ? "var(--t-3)" : undefined }}></span>
             <span>{ws.name}</span>
             <span className="ws-count">{ws.count}</span>
+            {ws.alias !== "all" && (
+              <span
+                className="ws-delete"
+                title={`Remove ${ws.alias}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDeleteError("");
+                  setConfirmDelete(ws.alias);
+                }}
+              >×</span>
+            )}
           </button>
         ))}
       </nav>
@@ -49,17 +74,23 @@ export function TopBar() {
         <button className="icon-btn" title="Hatch new Thronglet (Ctrl+N)" onClick={() => setSpawnDialogOpen(true)}>
           <Icon name="plus" size={14} />
         </button>
-        <button
-          className={"icon-btn" + (dispatcherOpen ? " on" : "")}
-          title="Toggle status panel"
-          onClick={toggleDispatcher}
-        >
-          <Icon name="panel" size={14} />
-        </button>
         <button className="icon-btn" title="Toggle theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
           <Icon name="settings" size={14} />
         </button>
       </div>
+
+      {confirmDelete && (
+        <div className="ws-confirm-overlay" onClick={() => { setConfirmDelete(null); setDeleteError(""); }}>
+          <div className="ws-confirm-dialog" onClick={(e) => e.stopPropagation()}>
+            <div className="ws-confirm-title">Remove workspace "{confirmDelete}"?</div>
+            {deleteError && <div className="ws-confirm-error">{deleteError}</div>}
+            <div className="ws-confirm-actions">
+              <button className="tb-btn" onClick={() => { setConfirmDelete(null); setDeleteError(""); }}>Cancel</button>
+              <button className="tb-btn danger" onClick={() => handleDeleteWs(confirmDelete)}>Remove</button>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 }

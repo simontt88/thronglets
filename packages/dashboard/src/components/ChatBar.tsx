@@ -38,6 +38,20 @@ export function ChatBar() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [selectorOpen]);
 
+  const DISPATCHER_ALIASES = new Set(["D", "d", "dispatch", "dispatcher", "orix"]);
+
+  const resolveTarget = (target: string, body: string): { resolved: string; finalBody: string } => {
+    if (target === "@all" || target === "dispatch" || target === "_dispatcher") {
+      return { resolved: target, finalBody: body };
+    }
+    // Check for @D style inline mentions at start of message
+    const mentionMatch = body.match(/^@(\w+)\s*/);
+    if (mentionMatch && DISPATCHER_ALIASES.has(mentionMatch[1])) {
+      return { resolved: "dispatch", finalBody: body.slice(mentionMatch[0].length).trim() || body };
+    }
+    return { resolved: target, finalBody: body };
+  };
+
   const handleSend = async () => {
     const trimmed = text.trim();
     if (!trimmed || !activeAgent || sending) return;
@@ -45,23 +59,24 @@ export function ChatBar() {
     setSending(true);
     setText("");
 
-    if (activeAgent === "@all") {
+    const { resolved, finalBody } = resolveTarget(activeAgent, trimmed);
+
+    if (resolved === "@all") {
       for (const a of agents) {
-        sendMessage(a.name, trimmed);
+        sendMessage(a.name, finalBody);
       }
-    } else if (activeAgent === "dispatch") {
+    } else if (resolved === "dispatch" || resolved === "_dispatcher") {
       const dispatcher = agents.find((a) => a.name === "_dispatcher");
       if (dispatcher) {
-        sendMessage("_dispatcher", trimmed);
+        sendMessage("_dispatcher", finalBody);
       } else {
-        // No dispatcher agent — show error, don't silently route elsewhere
         console.warn("[chatbar] _dispatcher not found, message not sent");
         setText(trimmed);
         setSending(false);
         return;
       }
     } else {
-      sendMessage(activeAgent, trimmed);
+      sendMessage(resolved, finalBody);
     }
 
     setSending(false);

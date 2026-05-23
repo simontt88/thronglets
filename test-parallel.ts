@@ -36,7 +36,7 @@ const agents = [
   },
 ];
 
-console.log(`\n=== Kenyalang Parallel Test ===`);
+console.log(`\n=== Thronglets Parallel Test ===`);
 console.log(`Workspace: ${WORKSPACE}`);
 console.log(`Prompt: "${PROMPT}"`);
 console.log(`Agents: ${agents.length}`);

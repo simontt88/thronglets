@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { useFleetStore, fetchSessionList, fetchSessionEvents, getAgentAccent } from "../stores/fleet";
+import { useFleetStore, fetchSessionList, fetchSessionEvents, getAgentAccent, setAgentTitle } from "../stores/fleet";
 import type { AgentState, SessionEvent } from "../stores/fleet";
 import { STATUS_META } from "../lib/constants";
 import { renderMarkdown } from "../lib/markdown";
@@ -45,6 +45,8 @@ export function SessionCard({ agent, placement }: Props) {
 
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   const [showSessionPicker, setShowSessionPicker] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const fontSize = fontSizes[agent.name] || 13.5;
 
@@ -100,7 +102,34 @@ export function SessionCard({ agent, placement }: Props) {
           <div className="session-name">
             <span className="name-text">{isDispatcher ? "Orix" : agent.name}</span>
             {isDispatcher && <span className="dispatcher-badge">DISPATCH</span>}
+            {agent.title && !editingTitle && (
+              <span className="agent-title" onClick={(e) => { e.stopPropagation(); setTitleDraft(agent.title || ""); setEditingTitle(true); }}>
+                {agent.title}
+              </span>
+            )}
+            {!agent.title && !isDispatcher && !editingTitle && (
+              <button className="title-add-btn" onClick={(e) => { e.stopPropagation(); setTitleDraft(""); setEditingTitle(true); }} title="Add title">
+                <Icon name="pencil" size={10} />
+              </button>
+            )}
           </div>
+          {editingTitle && (
+            <div className="title-edit" onClick={(e) => e.stopPropagation()}>
+              <input
+                className="title-input"
+                placeholder="e.g. QA master"
+                value={titleDraft}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { setAgentTitle(agent.name, titleDraft.trim()); setEditingTitle(false); }
+                  if (e.key === "Escape") setEditingTitle(false);
+                }}
+              />
+              <button className="ico-btn" onClick={() => { setAgentTitle(agent.name, titleDraft.trim()); setEditingTitle(false); }}><Icon name="check" size={12} /></button>
+              <button className="ico-btn" onClick={() => setEditingTitle(false)}><Icon name="x" size={12} /></button>
+            </div>
+          )}
           <div className="session-codename">{agent.runtime} · {agent.model}</div>
           {!isDispatcher && agent.sessionName && <span className="session-tag">「{agent.sessionName}」</span>}
         </div>

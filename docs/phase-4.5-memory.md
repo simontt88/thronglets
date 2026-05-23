@@ -9,7 +9,7 @@
 
 ## Current State
 
-Fleet sessions are persisted as JSONL at `~/.kenyalang/fleet/sessions/{agentName}/`.
+Fleet sessions are persisted as JSONL at `~/.thronglets/fleet/sessions/{agentName}/`.
 Each new agent session automatically captures the full conversation. The legacy
 `LocalRecall` module provides basic token-match search over these logs.
 
@@ -40,13 +40,13 @@ Cost: Zero    Deps: fs    Latency: <1ms write
 ```
 
 - Raw JSONL per agent session (already implemented)
-- `~/.kenyalang/fleet/sessions/{agent}/{date}.jsonl`
+- `~/.thronglets/fleet/sessions/{agent}/{date}.jsonl`
 - Keyword search via `LocalRecall.search()`
 - **No summarization, no cross-session synthesis**
 
 **When to use:** You just want transcripts. Workspace already handles context.
 
-**Finding old sessions:** `ls ~/.kenyalang/fleet/sessions/{agent}/` — files sorted by date.
+**Finding old sessions:** `ls ~/.thronglets/fleet/sessions/{agent}/` — files sorted by date.
 The `index.json` in the store directory lists all sessions with metadata (first/last message,
 preview, message count).
 
@@ -62,7 +62,7 @@ Inspired by `memory-mcp` (butterflyskies) and `.cursor/rules` patterns. A single
 `MEMORY.md` file per agent (or per workspace) that the agent itself reads and appends to.
 
 ```
-~/.kenyalang/fleet/memory/{agent}/MEMORY.md
+~/.thronglets/fleet/memory/{agent}/MEMORY.md
 ```
 
 Structure:
@@ -125,10 +125,10 @@ memory:
   provider: mcp
   server: memory-mcp-1file
   config:
-    data_dir: ~/.kenyalang/fleet/memory
+    data_dir: ~/.thronglets/fleet/memory
 ```
 
-The agent calls `memory_store` / `memory_recall` tools via MCP. Kenyalang doesn't
+The agent calls `memory_store` / `memory_recall` tools via MCP. Thronglets doesn't
 need to understand the internals — it just ensures the MCP server is available.
 
 ---
@@ -282,7 +282,7 @@ Agents run *inside* Letta, which manages the loop, tools, and state.
 - Willing to adopt Letta as your agent platform
 
 **Lock-in warning:** High. Adopting Letta means rewriting your agent infrastructure.
-For Kenyalang, this is a **complement** not a replacement — you'd run a Letta agent
+For Thronglets, this is a **complement** not a replacement — you'd run a Letta agent
 as one of your fleet runtimes, with Letta managing that agent's memory internally.
 
 ---
@@ -327,7 +327,7 @@ interface Skill {
 | [SkillX](https://arxiv.org/pdf/2604.04804) (Apr 2026) | Multi-level skills (Planning/Functional/Atomic) + iterative refinement + exploratory expansion | Architecture for skill hierarchy |
 | [SkillNet](https://arxiv.org/pdf/2603.04448) (Mar 2026) | Skills as independent units with dependency graph, evaluation dimensions, community sharing | Model for fleet-level skill sharing |
 
-### Implementation for Kenyalang
+### Implementation for Thronglets
 
 **Tier 0-1 (file-based):** Skills stored as entries in `MEMORY.md` or a `skills/` directory
 with one markdown file per skill.
@@ -337,8 +337,8 @@ queryable by trigger similarity and tags.
 
 **Fleet-level sharing:**
 ```
-~/.kenyalang/fleet/skills/         # shared across all agents
-~/.kenyalang/fleet/skills/{agent}/ # agent-specific overrides
+~/.thronglets/fleet/skills/         # shared across all agents
+~/.thronglets/fleet/skills/{agent}/ # agent-specific overrides
 ```
 
 ---
@@ -400,18 +400,18 @@ export interface ReflectOpts {
 ## Configuration
 
 ```yaml
-# ~/.kenyalang/config.yaml
+# ~/.thronglets/config.yaml
 memory:
   provider: markdown          # "off" | "markdown" | "mcp" | "mem0" | "hindsight" | "zep" | "letta"
   
   # Tier 1
   markdown:
-    path: ~/.kenyalang/fleet/memory
+    path: ~/.thronglets/fleet/memory
 
   # Tier 1.5
   mcp:
     server: memory-mcp-1file
-    data_dir: ~/.kenyalang/fleet/memory
+    data_dir: ~/.thronglets/fleet/memory
 
   # Tier 2
   mem0:
@@ -421,7 +421,7 @@ memory:
   # Tier 2.5
   hindsight:
     api_key: ${HINDSIGHT_API_KEY}
-    bank_id: kenyalang-fleet
+    bank_id: thronglets-fleet
 
   # Tier 3
   zep:
@@ -430,7 +430,7 @@ memory:
 
   skills:
     enabled: true
-    shared_dir: ~/.kenyalang/fleet/skills
+    shared_dir: ~/.thronglets/fleet/skills
     auto_extract: true        # auto-extract skills after successful multi-step tasks
     confidence_threshold: 0.3 # min confidence to suggest a skill
 ```
@@ -443,13 +443,13 @@ Regardless of which tier is active, session transcripts are always available:
 
 ```bash
 # List all sessions for an agent
-ls ~/.kenyalang/fleet/sessions/{agent-name}/
+ls ~/.thronglets/fleet/sessions/{agent-name}/
 
 # Search across sessions (built-in)
-kenyalang recall "deploy dashboard" --agent builder-1
+thronglets recall "deploy dashboard" --agent builder-1
 
 # View session index (when memory layer is active)
-cat ~/.kenyalang/fleet/memory/{agent-name}/MEMORY.md  # Tier 1
+cat ~/.thronglets/fleet/memory/{agent-name}/MEMORY.md  # Tier 1
 # or query via API for Tier 2+
 ```
 
@@ -494,7 +494,7 @@ session accomplished — even if you switch memory tiers later, this table persi
 
 ---
 
-## Recommendation for Kenyalang
+## Recommendation for Thronglets
 
 **Start with Tier 1 (Markdown Memory)** — it's zero-cost, immediately useful, and
 human-auditable. Layer on Tier 1.5 (MCP) for semantic search when needed. Design

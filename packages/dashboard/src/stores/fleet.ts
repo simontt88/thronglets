@@ -3,6 +3,8 @@ import { getAgentColor, PALETTE } from "../lib/constants";
 
 export interface AgentState {
   name: string;
+  title?: string;
+  personality?: string;
   runtime: string;
   model: string;
   workspace: string;
@@ -393,17 +395,33 @@ export async function addWorkspace(alias: string, path: string) {
   }
 }
 
-export async function deleteWorkspace(alias: string) {
+export async function deleteWorkspace(alias: string): Promise<{ ok: boolean; message: string; agents?: string[] }> {
   try {
     const res = await fetch(`${serverBase.http}/api/workspaces/${encodeURIComponent(alias)}`, { method: "DELETE" });
     const data = await res.json();
+    if (!res.ok) {
+      return { ok: false, message: data.error || "Failed to delete", agents: data.agents };
+    }
     if (data.workspaces) {
       useFleetStore.setState({ workspaces: data.workspaces });
     }
-    return data.message as string;
+    return { ok: true, message: data.message };
   } catch (e) {
-    return String(e);
+    return { ok: false, message: String(e) };
   }
+}
+
+export async function setAgentTitle(name: string, title: string) {
+  try {
+    await fetch(`${serverBase.http}/api/agents/${encodeURIComponent(name)}/title`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    useFleetStore.setState((s) => ({
+      agents: s.agents.map((a) => a.name === name ? { ...a, title: title || undefined } : a),
+    }));
+  } catch {}
 }
 
 export function getAgentAccent(agent: AgentState): string {

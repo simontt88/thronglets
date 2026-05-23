@@ -123,6 +123,12 @@ function loadWorkspaces(): WorkspaceEntry[] {
   }
 }
 
+const DISPATCHER_ALIASES = new Set(["D", "d", "dispatch", "dispatcher", "orix"]);
+
+function resolveDispatcherAlias(mention: string): string {
+  return DISPATCHER_ALIASES.has(mention) ? "_dispatcher" : mention;
+}
+
 function parseAtMentions(text: string): { mentions: string[]; body: string } {
   const mentionRegex = /^(@\w+\s*)+/;
   const match = text.match(mentionRegex);
@@ -130,7 +136,7 @@ function parseAtMentions(text: string): { mentions: string[]; body: string } {
 
   const mentionStr = match[0];
   const body = text.slice(mentionStr.length).trim();
-  const mentions = [...mentionStr.matchAll(/@(\w+)/g)].map((m) => m[1]);
+  const mentions = [...mentionStr.matchAll(/@(\w+)/g)].map((m) => resolveDispatcherAlias(m[1]));
   return { mentions, body };
 }
 
@@ -228,14 +234,18 @@ async function main() {
             "📋 Commands:",
             "  /new [name] [runtime] [workspace] — hatch a thronglet",
             "  /kill <name> — release a thronglet",
-            "  /change <name> <model|workspace|runtime> <value> — reconfigure",
+            "  /change <name> <field> <value> — reconfigure",
             "  /clear <name> — fresh session (keep thronglet)",
             "  /fleet — list all thronglets + status",
             "  /status <name> — thronglet detail",
+            "  /title <name> <title> — set thronglet title",
+            "  /workspace [add alias path] — list or add workspaces",
+            "  /dispatcher [restart] — dispatcher info / restart",
             "",
             "💬 Messaging:",
-            "  Just type — goes to your only thronglet",
-            "  @name msg — route to a specific one",
+            "  Just type — auto-routes via dispatcher",
+            "  @name msg — route to a specific thronglet",
+            "  @D msg — route to dispatcher (also @d, @orix)",
             "  @all msg — broadcast to all",
             "",
             `⚙️ Runtimes:\n${runtimes}`,
@@ -307,25 +317,41 @@ async function main() {
 
         case "/fleet": {
           const status = fleet.getStatus();
-          if (status.total === 0) {
+          const thronglets = status.agents.filter((a) => a.name !== "_dispatcher");
+          if (thronglets.length === 0) {
             await transport.sendReply(chatId, "No thronglets running.\nHatch one: /new [runtime] [workspace]");
             return;
           }
-          const lines = status.agents
-            .filter((a) => a.name !== "_dispatcher")
-            .map((a) => {
-              const dot = a.status === "working" ? "\u{1F7E2}"
-                : a.status === "error" ? "\u{1F534}"
-                : a.status === "dead" ? "\u{1F480}"
-                : "\u26AA";
-              const activity = a.inferred && a.status === "working"
-                ? a.inferred.replace("processing message from ", "← ")
-                : a.sessionName || a.workspace;
-              return `${dot} **${a.name}**  ${activity}`;
-            });
-          const deadInfo = status.dead ? `, ${status.dead} dead` : "";
-          const header = `🐣 Fleet: ${status.total - 1} thronglets (${status.working} working, ${status.idle} idle${deadInfo})`;
-          await transport.sendReply(chatId, `${header}\n\n${lines.join("\n")}`);
+          const lines = thronglets.map((a) => {
+            const dot = a.status === "working" ? "🟢"
+              : a.status === "error" ? "🔴"
+              : a.status === "dead" ? "💀"
+              : a.status === "idle" ? "⚪"
+              : "⚫";
+            const titleStr = a.title ? ` — ${a.title}` : "";
+            const ago = timeSince(a.lastActivity);
+            const activity = a.inferred && a.status === "working"
+              ? a.inferred.replace("processing message from ", "← ")
+              : a.sessionName || "";
+            const actStr = activity ? `  _${activity}_` : "";
+            return `${dot} *${a.name}*${titleStr}\n    ${a.runtime} · ${a.workspace} · ${ago}${actStr}`;
+          });
+
+          const working = thronglets.filter((a) => a.status === "working").length;
+          const idle = thronglets.filter((a) => a.status === "idle").length;
+          const dead = thronglets.filter((a) => a.status === "dead" || a.status === "stopped").length;
+          const errored = thronglets.filter((a) => a.status === "error").length;
+          const parts = [`${working} working`, `${idle} idle`];
+          if (dead) parts.push(`${dead} dead`);
+          if (errored) parts.push(`${errored} error`);
+
+          const dispatcher = fleet.getAgent("_dispatcher");
+          const dispLine = dispatcher
+            ? `\n🔮 *Dispatcher* (Orix): ${dispatcher.status} · ${timeSince(dispatcher.lastActivity)}`
+            : "\n⚠️ Dispatcher: offline";
+
+          const header = `Fleet: ${thronglets.length} thronglets (${parts.join(", ")})`;
+          await transport.sendReply(chatId, `${header}\n\n${lines.join("\n\n")}${dispLine}`);
           return;
         }
 
@@ -338,11 +364,12 @@ async function main() {
               return;
             }
             const lines = [
-              `Agent: ${agent.name}`,
+              `*${agent.name}*${agent.title ? ` — ${agent.title}` : ""}`,
               `Runtime: ${agent.runtime}`,
               `Model: ${agent.model}`,
               `Workspace: ${agent.workspace} (${agent.workspacePath})`,
               `Status: ${agent.status}`,
+              `Last active: ${timeSince(agent.lastActivity)}`,
               `Session: ${agent.currentSessionId}${agent.sessionName ? ` 「${agent.sessionName}」` : ""}`,
               `Messages: ${agent.messageCount}`,
               `Spawned: ${agent.spawnedAt}`,
@@ -355,18 +382,87 @@ async function main() {
           return;
         }
 
+        case "/dispatcher": {
+          const sub = args[0];
+          const dispatcherAgent = fleet.getAgent(DISPATCHER_AGENT_NAME);
+
+          if (sub === "restart" || sub === "reset") {
+            if (dispatcherAgent) await fleet.kill(DISPATCHER_AGENT_NAME);
+            const ok = await startDispatcher(fleet, bus, config, workspaces);
+            await transport.sendReply(chatId, ok ? "✅ Dispatcher restarted." : "❌ Dispatcher failed to start.");
+            return;
+          }
+
+          if (!dispatcherAgent) {
+            await transport.sendReply(chatId, "⚠️ Dispatcher is offline.\nUse /dispatcher restart to bring it back.");
+            return;
+          }
+
+          const lines = [
+            `🔮 *Dispatcher* (Orix)`,
+            `Status: ${dispatcherAgent.status}`,
+            `Last active: ${timeSince(dispatcherAgent.lastActivity)}`,
+            `Session: ${dispatcherAgent.currentSessionId}`,
+            `Messages: ${dispatcherAgent.messageCount}`,
+            "",
+            `Use /dispatcher restart to force-restart.`,
+          ];
+          await transport.sendReply(chatId, lines.join("\n"));
+          return;
+        }
+
+        case "/title": {
+          const tName = args[0];
+          const tTitle = args.slice(1).join(" ");
+          if (!tName) {
+            await transport.sendReply(chatId, "Usage: /title <name> <title>\nExample: /title Felta QA master");
+            return;
+          }
+          if (!fleet.hasAgent(tName)) {
+            await transport.sendReply(chatId, `Agent "${tName}" not found.`);
+            return;
+          }
+          const titleResult = fleet.setTitle(tName, tTitle);
+          await transport.sendReply(chatId, titleResult);
+          return;
+        }
+
+        case "/workspace": {
+          const sub = args[0];
+          if (sub === "add") {
+            const wAlias = args[1];
+            const wPath = args[2];
+            if (!wAlias || !wPath) {
+              await transport.sendReply(chatId, "Usage: /workspace add <alias> <path>\nExample: /workspace add myrepo /home/user/repos/myrepo");
+              return;
+            }
+            const addResult = fleet.addWorkspace(wAlias, wPath);
+            await transport.sendReply(chatId, addResult);
+            return;
+          }
+          // Default: list workspaces
+          const wsList = workspaces.map((w) => `  • ${w.alias} — ${w.path}`).join("\n");
+          await transport.sendReply(chatId, `Workspaces:\n${wsList || "  (none)"}`);
+          return;
+        }
+
         case "/help":
           await transport.sendReply(chatId, [
             "Thronglets Commands:",
-            "  /new [name] [runtime] [workspace] — hatch a thronglet",
+            "  /new [runtime] [workspace] — hatch a thronglet",
             "  /kill <name> — release a thronglet",
             "  /clear <name> — archive session, fresh start",
-            "  /fleet — show all thronglets",
+            "  /fleet — show all thronglets + status",
             "  /status [name] — thronglet detail",
+            "  /title <name> <title> — set thronglet title",
+            "  /dispatcher [restart] — dispatcher status / restart",
+            "  /workspace [add alias path] — list or add workspaces",
             "",
             "Messaging:",
             "  @name message — send to specific thronglet",
+            "  @D message — route to dispatcher (also @d, @orix)",
             "  @all message — broadcast to all",
+            "  (no @) — auto-route via dispatcher",
             "",
             `Runtimes: ${config.agents.map((a) => a.runtime).join(", ")}`,
             `Workspaces: ${workspaces.map((w) => w.alias).join(", ")}`,
@@ -435,8 +531,20 @@ async function main() {
       }
     } else if (agentList.length === 0 && !fleet.hasAgent(DISPATCHER_AGENT_NAME)) {
       await transport.sendReply(chatId, "No thronglets running.\n\nHatch one: /new [runtime] [workspace]");
-    } else if (dispatcherConfig.enabled && fleet.hasAgent(DISPATCHER_AGENT_NAME)) {
-      // Dispatcher enabled — route unmentioned messages to dispatcher
+    } else if (dispatcherConfig.enabled) {
+      // Dispatcher enabled — check health & auto-recover if needed
+      const dispatcherAgent = fleet.getAgent(DISPATCHER_AGENT_NAME);
+      if (!dispatcherAgent || dispatcherAgent.status === "dead" || dispatcherAgent.status === "error") {
+        await transport.sendReply(chatId, "🔄 Dispatcher is down — restarting...");
+        if (dispatcherAgent) await fleet.kill(DISPATCHER_AGENT_NAME);
+        const restarted = await startDispatcher(fleet, bus, config, workspaces);
+        if (!restarted) {
+          await transport.sendReply(chatId, "❌ Dispatcher failed to restart. Use @name to talk to a thronglet directly.");
+          return;
+        }
+        await transport.sendReply(chatId, "✅ Dispatcher recovered. Routing your message now...");
+      }
+
       await transport.sendTyping(chatId);
       const typingInterval = setInterval(() => { transport.sendTyping(chatId).catch(() => {}); }, 4000);
       const startTime = Date.now();
@@ -476,9 +584,20 @@ async function main() {
   console.log(`\n  Commands: /new /kill /fleet /clear /change /status /help`);
   console.log(`  Mention:  @name message | @all message\n`);
 
-  setInterval(() => {
+  setInterval(async () => {
     const s = fleet.getStatus();
     console.log(`[heartbeat] ${new Date().toISOString()} fleet=${s.total} working=${s.working} dead=${s.dead}`);
+
+    // Auto-recover dispatcher if it died
+    if (dispatcherConfig.enabled) {
+      const disp = fleet.getAgent(DISPATCHER_AGENT_NAME);
+      if (!disp || disp.status === "dead") {
+        console.log("[heartbeat] dispatcher is dead — auto-recovering...");
+        if (disp) await fleet.kill(DISPATCHER_AGENT_NAME);
+        const ok = await startDispatcher(fleet, bus, config, workspaces);
+        console.log(`[heartbeat] dispatcher recovery: ${ok ? "success" : "failed"}`);
+      }
+    }
   }, 5 * 60 * 1000);
 }
 

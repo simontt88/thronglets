@@ -9,6 +9,21 @@ import { getToolInstructions } from "./tool-instructions.js";
 import { generateUniqueName } from "./naming.js";
 import type { AgentState, AgentStatus, FleetState, QueuedMessage, MessageSender } from "./types.js";
 
+const TRAITS = ["curious", "sleepy", "eager", "chaotic", "calm", "skeptical"] as const;
+const ADJECTIVES = ["playful", "intense", "gentle", "wild", "stoic", "witty", "shy", "bold"] as const;
+
+function generatePersonality(name: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < name.length; i++) {
+    h ^= name.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  h >>>= 0;
+  const trait = TRAITS[h % TRAITS.length];
+  const adj = ADJECTIVES[(h >>> 8) % ADJECTIVES.length];
+  return `${adj} · ${trait}`;
+}
+
 export interface WorkspaceEntry {
   alias: string;
   path: string;
@@ -132,6 +147,15 @@ export class FleetManager {
     return generateUniqueName(this.listAgents());
   }
 
+  setTitle(name: string, title: string): string {
+    const live = this.agents.get(name);
+    if (!live) return `"${name}" not found.`;
+    live.state.title = title || undefined;
+    this.persistState();
+    this.bus.publish("status_change", name, live.sessionId, { title });
+    return `"${name}" title set to "${title}"`;
+  }
+
   async spawn(name: string | undefined, runtime: RuntimeType, workspaceAlias: string, model?: string): Promise<string> {
     if (!name) name = this.autoName();
     if (this.agents.has(name)) {
@@ -156,6 +180,7 @@ export class FleetManager {
 
     const agentState: AgentState = {
       name,
+      personality: generatePersonality(name),
       runtime,
       model: agentDef.model,
       workspace: workspaceAlias,
@@ -253,15 +278,12 @@ export class FleetManager {
     this.logToSession(name, live.sessionId, { type: "user_message", text: taggedText, sender });
 
     const attemptSend = async (isRetry: boolean): Promise<string> => {
-      if (!live.session) {
-        const sessionsDir = getSessionsDir(name);
-        const sessionContext = this.buildSessionContext(name, sessionsDir);
-
+      const isNewSession = !live.session;
+      if (isNewSession) {
         live.session = await this.withTimeout(
           live.runtime.createSession({
             cwd: live.state.workspacePath,
             model: live.state.model,
-            context: sessionContext,
             name: `fleet-${name}-${live.sessionId}`,
           }),
           60_000,
@@ -270,8 +292,11 @@ export class FleetManager {
         this.bus.publish("session_started", name, live.sessionId);
       }
 
+      const preamble = isNewSession ? this.buildPreamble(name) : "";
+      const finalText = preamble ? `${preamble}\n\n---\n\n${taggedText}` : taggedText;
+
       return this.withTimeout(
-        live.session.send(taggedText),
+        live.session!.send(finalText),
         SEND_TIMEOUT_MS,
         `${name} send`,
       );
@@ -388,20 +413,73 @@ export class FleetManager {
     }
   }
 
-  private buildSessionContext(name: string, sessionsDir: string): string {
+  buildPreamble(name: string): string {
     const isDispatcher = name === "_dispatcher";
     const live = this.agents.get(name);
-    const lines = [
-      `You are agent "${name}" running in workspace: ${live?.state.workspacePath}`,
-      `Your session history is stored at: ${sessionsDir}`,
-      `Each file is a JSONL log (one JSON object per line with ts, type, text fields).`,
-      `If the user asks to recall/search past conversations, read or grep these files.`,
+    if (!live) return "";
+    const sessionsDir = getSessionsDir(name);
+
+    if (isDispatcher) {
+      return this.buildDispatcherPreamble(live, sessionsDir);
+    }
+
+    const titleStr = live.state.title ? ` — ${live.state.title}` : "";
+    const personality = live.state.personality || "curious";
+    return [
+      `[SYSTEM] You are "${name}"${titleStr}. Personality: ${personality}.`,
+      `You are a thronglet in the Thronglets fleet. Your session logs: ${sessionsDir}`,
+      `Messages from other agents are prefixed [from:name]. Messages from the dispatcher are [from:_dispatcher]. Messages from the human master have no prefix.`,
       "",
-      `Messages from other agents are prefixed with [from:agentname]. Respond naturally.`,
-      "",
-      getToolInstructions(isDispatcher),
-    ];
-    return lines.join("\n");
+      getToolInstructions(false),
+    ].join("\n");
+  }
+
+  private buildDispatcherPreamble(live: LiveAgent, sessionsDir: string): string {
+    const status = this.getStatus();
+    const agentSummary = status.agents
+      .filter((a) => a.name !== "_dispatcher")
+      .map((a) => {
+        const titlePart = a.title ? ` (${a.title})` : "";
+        const parts = [`@${a.name}${titlePart}: ${a.runtime} · ws:${a.workspace} · ${a.status}`];
+        if (a.sessionName) parts.push(`「${a.sessionName}」`);
+        if (a.inferred && a.status === "working") parts.push(`(${a.inferred})`);
+        return `  - ${parts.join(" ")}`;
+      })
+      .join("\n");
+
+    const wsSummary = this.config.workspaces
+      .map((w) => `  - ${w.alias}: ${w.path}`)
+      .join("\n");
+
+    return [
+      `[SYSTEM] You are the Thronglets Fleet Dispatcher (Orix).`,
+      `Your session logs: ${sessionsDir}`,
+      ``,
+      `## Your role`,
+      `You manage a fleet of thronglets (coding agents). Each runs in a specific workspace with a specific runtime.`,
+      `When the user sends a message:`,
+      `1. Analyze what they need`,
+      `2. Route to the best thronglet(s) by workspace match, then runtime strength`,
+      `3. Forward using fleet tools below`,
+      `4. Report back briefly`,
+      ``,
+      `## Routing intelligence`,
+      `- **cursor**: in-IDE edits, refactors, code review, TypeScript/React`,
+      `- **claude-code**: terminal tasks, multi-step sweeps, shell scripts, complex analysis`,
+      `- **codex**: automation, planning, long-running background jobs`,
+      `- Match by workspace first, then runtime. Split large tasks across thronglets.`,
+      `- Never do coding work yourself — always delegate.`,
+      `- If no thronglets available, suggest spawning one.`,
+      ``,
+      getToolInstructions(true),
+      ``,
+      `## Current fleet`,
+      `${status.total - 1} thronglets (${status.working} working, ${status.idle} idle, ${status.dead} dead)`,
+      agentSummary || "  (no thronglets spawned — suggest spawning one)",
+      ``,
+      `## Workspaces`,
+      wsSummary || "  (none configured)",
+    ].join("\n");
   }
 
   private requestSessionName(name: string, live: LiveAgent): void {

@@ -1,7 +1,7 @@
 export interface RuntimeSessionOptions {
   cwd: string;
   model: string;
-  context: string;
+  context?: string;
   name?: string;
 }
 

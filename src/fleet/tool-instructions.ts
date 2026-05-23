@@ -12,6 +12,7 @@ You can execute fleet operations by including markers in your reply:
 - Get fleet status: [FLEET:fleet_status:{}]
 - Add workspace: [FLEET:fleet_workspace_add:{"alias":"short-name","path":"/absolute/path"}]
 - List workspaces: [FLEET:fleet_workspace_list:{}]
+- Set agent title: [FLEET:fleet_set_title:{"name":"agentname","title":"QA master"}]
 
 You can include multiple markers in one reply. Results are logged to your session.
 Include the marker anywhere in your reply text — it will be stripped before showing to the user.
