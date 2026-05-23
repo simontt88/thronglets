@@ -1,5 +1,7 @@
 import { useFleetStore } from "../stores/fleet";
 import { Icon } from "./Icons";
+import { PixelThronglet } from "./PixelThronglet";
+import { generateThronglet } from "../lib/thronglet";
 
 export function TopBar() {
   const { agents, workspaces, currentWorkspace, setWorkspace, dispatcherOpen, toggleDispatcher, theme, setTheme, setCommandBarOpen, setSpawnDialogOpen } = useFleetStore();
@@ -17,8 +19,10 @@ export function TopBar() {
   return (
     <header className="topbar">
       <div className="brand">
-        <div className="brand-mark"></div>
-        <div className="brand-name">kenyalang<span className="dim">fleet</span></div>
+        <div className="brand-mark">
+          <PixelThronglet spec={generateThronglet("thronglets")} mood="happy" size={28} />
+        </div>
+        <div className="brand-name">Thronglets<span className="dim">fleet</span></div>
       </div>
 
       <nav className="workspaces">
@@ -42,12 +46,12 @@ export function TopBar() {
           <span>Commands…</span>
           <span className="kbd">⌘K</span>
         </button>
-        <button className="icon-btn" title="Spawn agent (Ctrl+N)" onClick={() => setSpawnDialogOpen(true)}>
+        <button className="icon-btn" title="Hatch new Thronglet (Ctrl+N)" onClick={() => setSpawnDialogOpen(true)}>
           <Icon name="plus" size={14} />
         </button>
         <button
           className={"icon-btn" + (dispatcherOpen ? " on" : "")}
-          title="Toggle dispatcher"
+          title="Toggle habitat"
           onClick={toggleDispatcher}
         >
           <Icon name="panel" size={14} />

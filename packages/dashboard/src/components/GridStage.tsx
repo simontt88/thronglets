@@ -10,9 +10,15 @@ export function GridStage() {
   const innerRef = useRef<HTMLDivElement>(null);
   const [stageW, setStageW] = useState(800);
 
-  const filtered = currentWorkspace === "all"
+  const rawFiltered = currentWorkspace === "all"
     ? agents
     : agents.filter((a) => a.workspace === currentWorkspace);
+
+  // Pin dispatcher card first, then the rest in original order
+  const filtered = [
+    ...rawFiltered.filter((a) => a.name === "_dispatcher"),
+    ...rawFiltered.filter((a) => a.name !== "_dispatcher"),
+  ];
 
   const agentKey = filtered.map((a) => a.name).join(",");
 

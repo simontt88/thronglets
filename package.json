@@ -9,7 +9,8 @@
   "scripts": {
     "start": "node --import tsx src/index.ts",
     "dev": "node --watch --import tsx src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "publish:dashboard": "bash scripts/publish-dashboard.sh"
   },
   "engines": {
     "node": ">=18"

@@ -1,13 +1,11 @@
-export const AGENT_COLORS: Record<string, string> = {
-  cursor: "#5e93c4",
-  "claude-code": "#b07f6a",
-  codex: "#6aaa83",
-};
+// Runtime-level metadata (the underlying agent runtime, not the thronglet).
+// Thronglet identity (name, palette, parts) is now derived from agent.name
+// via lib/thronglet/generate.ts — runtime no longer owns visual identity.
 
-export const AGENT_GLYPHS: Record<string, string> = {
-  cursor: "Cu",
-  "claude-code": "CC",
-  codex: "Cx",
+export const AGENT_COLORS: Record<string, string> = {
+  cursor: "#f3c33a",
+  "claude-code": "#f0a87a",
+  codex: "#9fd97a",
 };
 
 export const AGENT_ROLES: Record<string, string> = {
@@ -16,19 +14,16 @@ export const AGENT_ROLES: Record<string, string> = {
   codex: "automation · planning · long-running jobs",
 };
 
-export const PALETTE = ["#5e93c4", "#b07f6a", "#6aaa83", "#c89a55", "#c47a8e", "#8a82b8", "#6fb3ba", "#7a8392"];
+export const PALETTE = ["#f3c33a", "#f0a87a", "#9fd97a", "#a0d4f0", "#b89cd8", "#f0a8c0", "#e8dcb8", "#6a7090"];
 
-export const STATUS_META: Record<string, { color: string; label: string }> = {
-  working: { color: "var(--st-working)", label: "working" },
-  idle: { color: "var(--st-idle)", label: "idle" },
-  error: { color: "var(--st-error)", label: "error" },
-  stopped: { color: "var(--st-idle)", label: "stopped" },
+export const STATUS_META: Record<string, { color: string; label: string; mood: string }> = {
+  working:  { color: "var(--st-working)", label: "grinding",   mood: "working" },
+  idle:     { color: "var(--st-idle)",    label: "vibing",     mood: "idle" },
+  error:    { color: "var(--st-error)",   label: "distressed", mood: "skeptical" },
+  stopped:  { color: "var(--st-dead)",    label: "rip",        mood: "dead" },
+  dead:     { color: "var(--st-dead)",    label: "dead",       mood: "dead" },
 };
 
 export function getAgentColor(runtime: string): string {
-  return AGENT_COLORS[runtime] || "#8b8e9a";
-}
-
-export function getAgentGlyph(runtime: string): string {
-  return AGENT_GLYPHS[runtime] || "??";
+  return AGENT_COLORS[runtime] || "#f3c33a";
 }

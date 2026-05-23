@@ -1,7 +1,15 @@
 import { useState, useRef } from "react";
 import { useFleetStore, getAgentAccent } from "../stores/fleet";
-import { AGENT_COLORS, AGENT_GLYPHS, getAgentColor } from "../lib/constants";
+import { AGENT_COLORS } from "../lib/constants";
 import { Icon } from "./Icons";
+import { PixelThronglet } from "./PixelThronglet";
+import { generateThronglet, statusToMood } from "../lib/thronglet";
+
+const RUNTIME_LABELS: Record<string, string> = {
+  cursor: "in-IDE",
+  "claude-code": "terminal",
+  codex: "agentic",
+};
 
 export function Dispatcher() {
   const { agents, dispatcherOpen, toggleDispatcher, currentWorkspace } = useFleetStore();
@@ -14,14 +22,14 @@ export function Dispatcher() {
   const working = filtered.filter((a) => a.status === "working");
   const errors = filtered.filter((a) => a.status === "error");
   const idle = filtered.filter((a) => a.status === "idle");
+  const dead = filtered.filter((a) => a.status === "stopped");
 
-  // Per-runtime breakdown
   const runtimes = ["cursor", "claude-code", "codex"];
   const fleet = runtimes.map((rt) => {
     const mine = filtered.filter((a) => a.runtime === rt);
     return {
       runtime: rt,
-      glyph: AGENT_GLYPHS[rt] || "?",
+      label: RUNTIME_LABELS[rt] || rt,
       color: AGENT_COLORS[rt] || "#888",
       total: mine.length,
       working: mine.filter((a) => a.status === "working").length,
@@ -55,10 +63,12 @@ export function Dispatcher() {
   return (
     <div className="dispatcher-float" style={style}>
       <div className="df-head" onMouseDown={onHeadMouseDown}>
-        <div className="orb-mini"></div>
+        <div className="orb-mini" style={{ background: "transparent", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <PixelThronglet spec={generateThronglet("_dispatcher")} mood={working.length > 0 ? "working" : errors.length > 0 ? "skeptical" : "happy"} size={24} />
+        </div>
         <div className="df-title">
-          Fleet status
-          <span className="df-sub">{filtered.length} agents</span>
+          Habitat Status
+          <span className="df-sub">{filtered.length} thronglets</span>
         </div>
         <button className="df-close" onClick={toggleDispatcher}>
           <Icon name="x" size={13} />
@@ -73,18 +83,18 @@ export function Dispatcher() {
             <span className="u">/ {filtered.length}</span>
             {working.length > 0 && <span className="pulse-dot working"></span>}
           </div>
-          <div className="k">in flight</div>
+          <div className="k">grinding 🔥</div>
         </div>
         <div className="df-stat">
           <div className="v">
             {errors.length}
             {errors.length > 0 && <span className="pulse-dot waiting"></span>}
           </div>
-          <div className="k">errors</div>
+          <div className="k">distressed 😰</div>
         </div>
         <div className="df-stat">
-          <div className="v">{idle.length}</div>
-          <div className="k">idle</div>
+          <div className="v">{idle.length + dead.length}</div>
+          <div className="k">vibing 😴</div>
         </div>
       </div>
 
@@ -93,18 +103,18 @@ export function Dispatcher() {
         {fleet.length > 0 && (
           <div className="df-section">
             <div className="df-section-label">
-              <span>Agent fleet</span>
-              <span className="df-section-aux">{filtered.length} active</span>
+              <span>Species Breakdown</span>
+              <span className="df-section-aux">{filtered.length} alive</span>
             </div>
             <div className="df-fleet">
               {fleet.map((f) => (
                 <div key={f.runtime} className="df-fleet-row">
-                  <div className="df-fleet-avatar" style={{ background: `linear-gradient(140deg, ${f.color}, color-mix(in oklab, ${f.color} 55%, #2a2d36))` }}>
-                    {f.glyph}
+                  <div className="df-fleet-avatar" style={{ background: "transparent" }}>
+                    <PixelThronglet spec={generateThronglet(f.runtime)} mood="idle" size={36} />
                   </div>
                   <div className="df-fleet-meta">
                     <div className="df-fleet-name">
-                      <span>{f.runtime}</span>
+                      <span>{f.label}</span>
                       <span className="df-fleet-total">{f.total}</span>
                     </div>
                     <div className="df-fleet-bar">
@@ -114,9 +124,9 @@ export function Dispatcher() {
                       {f.total === 0 && <span className="seg ghost" style={{ flex: 1 }}></span>}
                     </div>
                     <div className="df-fleet-counts">
-                      <span><span className="d working"></span>{f.working} working</span>
-                      <span><span className="d idle"></span>{f.idle} idle</span>
-                      <span><span className="d error"></span>{f.error} error</span>
+                      <span><span className="d working"></span>{f.working} grinding</span>
+                      <span><span className="d idle"></span>{f.idle} vibing</span>
+                      <span><span className="d error"></span>{f.error} sad</span>
                     </div>
                   </div>
                 </div>
@@ -129,7 +139,7 @@ export function Dispatcher() {
         {working.length > 0 && (
           <div className="df-section">
             <div className="df-section-label">
-              <span>Running now</span>
+              <span>Grinding 💪</span>
               <span className="df-section-aux">{working.length}</span>
             </div>
             <div className="df-list">
@@ -138,12 +148,10 @@ export function Dispatcher() {
                   <span className="df-row-dot pulsing" style={{ background: getAgentAccent(a), color: getAgentAccent(a) }}></span>
                   <div className="df-row-body">
                     <div className="df-row-title">
-                      <span className="codename">{a.runtime}</span>
-                      <span className="sep">·</span>
-                      <span className="name">{a.name}</span>
+                      <span className="codename">{a.name}</span>
                       {a.sessionName && <span className="df-session-name">「{a.sessionName}」</span>}
                     </div>
-                    <div className="df-row-sub">{a.inferred || "processing..."}</div>
+                    <div className="df-row-sub">{a.inferred || "working hard..."}</div>
                     <div className="df-progress"><span className="df-progress-bar" style={{ background: getAgentAccent(a) }}></span></div>
                   </div>
                 </div>
@@ -156,7 +164,7 @@ export function Dispatcher() {
         {errors.length > 0 && (
           <div className="df-section">
             <div className="df-section-label">
-              <span>Needs attention</span>
+              <span>Needs Help 😢</span>
               <span className="df-section-aux">{errors.length}</span>
             </div>
             <div className="df-list">
@@ -165,12 +173,9 @@ export function Dispatcher() {
                   <span className="df-row-dot" style={{ background: "var(--st-error)" }}></span>
                   <div className="df-row-body">
                     <div className="df-row-title">
-                      <span className="codename">{a.runtime}</span>
-                      <span className="sep">·</span>
-                      <span className="name">{a.name}</span>
-                      {a.sessionName && <span className="df-session-name">「{a.sessionName}」</span>}
+                      <span className="codename">{a.name}</span>
                     </div>
-                    <div className="df-row-sub">{a.inferred || "error"}</div>
+                    <div className="df-row-sub">{a.inferred || "something went wrong..."}</div>
                   </div>
                 </div>
               ))}
@@ -182,7 +187,7 @@ export function Dispatcher() {
         {idle.length > 0 && (
           <div className="df-section">
             <div className="df-section-label">
-              <span>Idle</span>
+              <span>Vibing ✨</span>
               <span className="df-section-aux">{idle.length}</span>
             </div>
             <div className="df-list">
@@ -191,12 +196,9 @@ export function Dispatcher() {
                   <span className="df-row-dot" style={{ background: "var(--st-idle)" }}></span>
                   <div className="df-row-body">
                     <div className="df-row-title">
-                      <span className="codename">{a.runtime}</span>
-                      <span className="sep">·</span>
-                      <span className="name">{a.name}</span>
-                      {a.sessionName && <span className="df-session-name">「{a.sessionName}」</span>}
+                      <span className="codename">{a.name}</span>
                     </div>
-                    <div className="df-row-sub">{a.inferred || "standing by"}</div>
+                    <div className="df-row-sub">{a.inferred || "chilling..."}</div>
                   </div>
                 </div>
               ))}

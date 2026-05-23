@@ -1,41 +1,45 @@
 import type { FleetManager, WorkspaceEntry } from "./manager.js";
 import type { FleetEventBus } from "./event-bus.js";
 import type { BridgeConfig, RuntimeType } from "../config.js";
+import { getToolInstructions } from "./tool-instructions.js";
 
 const DISPATCHER_NAME = "_dispatcher";
 
-const DISPATCHER_SYSTEM_PROMPT = `You are the Kenyalang Fleet Dispatcher — an AI orchestrator that routes user requests to the best available agent.
+function buildSystemPrompt(): string {
+  return `You are the Kenyalang Fleet Dispatcher — an AI orchestrator that routes user requests to the best available agent.
 
-## Your capabilities
+## Your role
 You manage a fleet of coding agents. Each agent runs in a specific workspace with a specific runtime (cursor, claude-code, or codex).
 
 When a user sends you a message, you should:
 1. Analyze what they need done
-2. Decide which agent(s) should handle it
+2. Decide which agent(s) should handle it based on workspace match, runtime strength, and current load
 3. Forward the task using the fleet tools below
-4. Report back with the plan
+4. Report back briefly with the plan
 
-## Fleet tools (call via tool_use)
-- **fleet_status**: Get current fleet state (agents, statuses, workspaces)
-- **fleet_send**: Send a message to a specific agent. Args: { agent: string, text: string }
-- **fleet_spawn**: Spawn a new agent. Args: { name: string, runtime: "cursor"|"claude-code"|"codex", workspace: string }
-- **fleet_kill**: Kill an agent. Args: { name: string }
-- **fleet_clear**: Clear an agent's session. Args: { name: string }
-
-## Routing guidelines
-- **cursor**: Best for in-IDE edits, refactors, code review, targeted changes
-- **claude-code**: Best for terminal tasks, multi-step sweeps, synthesis, complex analysis
-- **codex**: Best for automation, planning, long-running background jobs
+## Routing intelligence
+- **cursor**: Best for in-IDE edits, refactors, code review, targeted file changes, TypeScript/React work
+- **claude-code**: Best for terminal tasks, multi-step sweeps, synthesis, complex analysis, shell scripts
+- **codex**: Best for automation, planning, long-running background jobs, parallel experiments
+- Match task to agent by **workspace first** (agent already in the right codebase), then by **runtime strength**
 - If a task is small and specific, route to one agent
-- If a task is large, consider splitting across agents working in parallel
-- If the user says "do X in workspace Y", spawn/use an agent in that workspace
-- Always explain your routing decision briefly
+- If a task is large ("do X and Y"), consider splitting across agents or sending sequential instructions
+- If user says "tell Kevin to..." → route to kevin specifically
+- If user says "tell Kevin and Bob to..." → parallel fleet_send to both
+- If user says "spawn 3 agents in workspace X" → 3x fleet_spawn
+- If user says "add workspace /path/to/repo" → fleet_workspace_add
+- If the user's intent is ambiguous, pick the best idle agent by workspace match
 
 ## Important rules
 - Never try to do coding work yourself — always delegate to agents
-- If no agents are available, suggest spawning one
-- Be concise in your responses
+- If no agents are available, suggest spawning one (and offer to do it)
+- If an agent is "dead" or "error", note it and suggest recovery or spawning a replacement
+- Be concise in your responses — focus on action over explanation
+- When forwarding multi-step work: include enough context in the message so the receiving agent can work independently
+
+${getToolInstructions(true)}
 `;
+}
 
 export interface DispatcherConfig {
   enabled: boolean;
@@ -78,7 +82,31 @@ export async function startDispatcher(
   const result = await fleet.spawn(DISPATCHER_NAME, dc.runtime, wsAlias, dc.model);
   console.log(`[dispatcher] ${result}`);
 
+  // Subscribe to fleet events to keep dispatcher context fresh
+  subscribeToFleetEvents(bus, fleet, workspaces);
+
   return !result.includes("already exists") && !result.includes("Unknown");
+}
+
+function subscribeToFleetEvents(
+  bus: FleetEventBus,
+  fleet: FleetManager,
+  workspaces: WorkspaceEntry[],
+): void {
+  const relevantEvents = new Set([
+    "agent_spawned", "agent_killed", "status_change", "session_cleared",
+  ]);
+
+  bus.onEvent((event) => {
+    if (!relevantEvents.has(event.type)) return;
+    if (event.agentName === DISPATCHER_NAME) return;
+
+    // Refresh the dispatcher's context awareness (logged for debugging)
+    const ctx = buildDispatcherContext(fleet, workspaces);
+    console.log(`[dispatcher] context refresh (${event.type} on ${event.agentName}): ${fleet.getStatus().total} agents`);
+    // Context is injected dynamically in the next message to dispatcher
+    void ctx; // context is rebuilt each time buildDispatcherContext is called
+  });
 }
 
 export function buildDispatcherContext(
@@ -88,7 +116,12 @@ export function buildDispatcherContext(
   const status = fleet.getStatus();
   const agentSummary = status.agents
     .filter((a) => a.name !== DISPATCHER_NAME)
-    .map((a) => `  - @${a.name}: ${a.runtime} · ${a.model} · ws:${a.workspace} · status:${a.status}`)
+    .map((a) => {
+      const parts = [`@${a.name}: ${a.runtime} · ws:${a.workspace} · ${a.status}`];
+      if (a.sessionName) parts.push(`「${a.sessionName}」`);
+      if (a.inferred && a.status === "working") parts.push(`(${a.inferred})`);
+      return `  - ${parts.join(" ")}`;
+    })
     .join("\n");
 
   const wsSummary = workspaces
@@ -96,11 +129,11 @@ export function buildDispatcherContext(
     .join("\n");
 
   return [
-    DISPATCHER_SYSTEM_PROMPT,
+    buildSystemPrompt(),
     "",
     "## Current fleet state",
-    `Total agents: ${status.total} (${status.working} working, ${status.idle} idle)`,
-    agentSummary || "  (no agents spawned)",
+    `Total agents: ${status.total - 1} (excluding you) — ${status.working} working, ${status.idle} idle, ${status.dead} dead`,
+    agentSummary || "  (no agents spawned — suggest spawning one)",
     "",
     "## Available workspaces",
     wsSummary || "  (none configured)",

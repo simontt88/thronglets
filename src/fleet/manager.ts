@@ -4,8 +4,9 @@ import type { AgentDef, BridgeConfig, RuntimeType } from "../config.js";
 import type { Runtime } from "../runtimes/interface.js";
 import type { AgentSession } from "../runtimes/interface.js";
 import { FleetEventBus } from "./event-bus.js";
-import { loadFleetState, saveFleetState, getSessionsDir } from "./state.js";
-import type { AgentState, AgentStatus, FleetState } from "./types.js";
+import { loadFleetState, saveFleetState, getSessionsDir, addWorkspace as addWorkspaceToState } from "./state.js";
+import { getToolInstructions } from "./tool-instructions.js";
+import type { AgentState, AgentStatus, FleetState, QueuedMessage, MessageSender } from "./types.js";
 
 export interface WorkspaceEntry {
   alias: string;
@@ -17,6 +18,8 @@ interface LiveAgent {
   runtime: Runtime;
   session: AgentSession | null;
   sessionId: string;
+  messageQueue: QueuedMessage[];
+  processing: boolean;
 }
 
 export interface FleetManagerConfig {
@@ -29,17 +32,28 @@ export interface FleetManagerConfig {
 const SEND_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes max per message
 const HEALTH_CHECK_INTERVAL_MS = 30 * 1000; // check every 30s
 
+export type ReplyRoutingCallback = (fromAgent: string, toAgent: string, reply: string) => void;
+
 export class FleetManager {
   private agents = new Map<string, LiveAgent>();
   private bus: FleetEventBus;
   private config: FleetManagerConfig;
-  private processing = new Set<string>();
   private healthInterval: ReturnType<typeof setInterval> | null = null;
+  private postReplyHook: ((agentName: string, reply: string, sender: MessageSender) => Promise<string>) | null = null;
+  private replyRoutingCallback: ReplyRoutingCallback | null = null;
 
   constructor(bus: FleetEventBus, config: FleetManagerConfig) {
     this.bus = bus;
     this.config = config;
     this.startHealthCheck();
+  }
+
+  setPostReplyHook(hook: (agentName: string, reply: string, sender: MessageSender) => Promise<string>): void {
+    this.postReplyHook = hook;
+  }
+
+  onReplyRouted(callback: ReplyRoutingCallback): void {
+    this.replyRoutingCallback = callback;
   }
 
   private startHealthCheck(): void {
@@ -61,7 +75,7 @@ export class FleetManager {
             status: "dead",
             elapsed_ms: elapsed,
           });
-          this.processing.delete(name);
+          live.processing = false;
           if (live.session) {
             try { live.session.close(); } catch {}
             live.session = null;
@@ -152,6 +166,8 @@ export class FleetManager {
       runtime: runtimeInstance,
       session: null,
       sessionId,
+      messageQueue: [],
+      processing: false,
     });
 
     this.bus.publish("agent_spawned", name, sessionId, { runtime, workspace: workspaceAlias, model: agentDef.model });
@@ -189,13 +205,25 @@ export class FleetManager {
     });
   }
 
-  async send(name: string, text: string): Promise<string> {
+  async send(name: string, text: string, sender: MessageSender = "user"): Promise<string> {
     const live = this.agents.get(name);
     if (!live) {
       return `Agent "${name}" not found. Use /new to spawn.`;
     }
 
-    // Auto-recover from dead/error: close stale session so a fresh one is created
+    // If agent is currently processing, queue the message
+    if (live.processing) {
+      return new Promise((resolve, reject) => {
+        live.messageQueue.push({ text, sender, resolve, reject });
+        console.log(`[fleet] ${name}: queued message from ${sender} (queue: ${live.messageQueue.length})`);
+      });
+    }
+
+    return this.processMessage(name, live, text, sender);
+  }
+
+  private async processMessage(name: string, live: LiveAgent, text: string, sender: MessageSender): Promise<string> {
+    // Auto-recover from dead/error
     if (live.state.status === "dead" || live.state.status === "error") {
       console.log(`[fleet] ${name}: recovering from ${live.state.status} — creating fresh session`);
       if (live.session) {
@@ -205,28 +233,23 @@ export class FleetManager {
       live.state.status = "idle";
     }
 
-    if (this.processing.has(name)) {
-      return `Agent "${name}" is still processing a previous message...`;
-    }
-
-    this.processing.add(name);
+    live.processing = true;
     live.state.status = "working";
-    live.state.inferred = "processing message";
+    live.state.inferred = `processing message from ${sender}`;
     live.state.lastActivity = new Date().toISOString();
-    live.state.lastUserMessage = text;
+    if (sender === "user") live.state.lastUserMessage = text;
+
+    // Tag message with sender for the agent to see
+    const taggedText = sender === "user" ? text : `[from:${sender}] ${text}`;
+
     this.bus.publish("status_change", name, live.sessionId, { status: "working" });
-    this.bus.publish("user_message", name, live.sessionId, { text });
-    this.logToSession(name, live.sessionId, { type: "user_message", text });
+    this.bus.publish("user_message", name, live.sessionId, { text: taggedText, sender });
+    this.logToSession(name, live.sessionId, { type: "user_message", text: taggedText, sender });
 
     const attemptSend = async (isRetry: boolean): Promise<string> => {
       if (!live.session) {
         const sessionsDir = getSessionsDir(name);
-        const sessionContext = [
-          `You are agent "${name}" running in workspace: ${live.state.workspacePath}`,
-          `Your session history is stored at: ${sessionsDir}`,
-          `Each file is a JSONL log (one JSON object per line with ts, type, text fields).`,
-          `If the user asks to recall/search past conversations, read or grep these files.`,
-        ].join("\n");
+        const sessionContext = this.buildSessionContext(name, sessionsDir);
 
         live.session = await this.withTimeout(
           live.runtime.createSession({
@@ -242,7 +265,7 @@ export class FleetManager {
       }
 
       return this.withTimeout(
-        live.session.send(text),
+        live.session.send(taggedText),
         SEND_TIMEOUT_MS,
         `${name} send`,
       );
@@ -261,16 +284,20 @@ export class FleetManager {
           live.session = null;
         }
         if (isTimeout) {
-          // Timeout = likely SDK hung; mark dead, don't retry immediately
           live.state.status = "dead";
           live.state.inferred = `send timed out after ${SEND_TIMEOUT_MS / 60_000}min — session closed`;
           this.bus.publish("status_change", name, live.sessionId, { status: "dead" });
           this.logToSession(name, live.sessionId, { type: "timeout", error: firstMsg });
           this.persistState();
-          this.processing.delete(name);
+          this.finishProcessing(name, live);
           return `⚠️ Agent "${name}" timed out (${SEND_TIMEOUT_MS / 60_000}min). Session closed. Send another message to auto-recover.`;
         }
         reply = await attemptSend(true);
+      }
+
+      // Run post-reply hook (fleet tool execution)
+      if (this.postReplyHook) {
+        reply = await this.postReplyHook(name, reply, sender);
       }
 
       live.state.messageCount++;
@@ -278,15 +305,21 @@ export class FleetManager {
       live.state.inferred = "idle — waiting for input";
       live.state.lastActivity = new Date().toISOString();
       live.state.lastAgentMessage = reply;
-      this.bus.publish("agent_message", name, live.sessionId, { text: reply });
+      this.bus.publish("agent_message", name, live.sessionId, { text: reply, sender });
       this.bus.publish("status_change", name, live.sessionId, { status: "idle" });
-      this.logToSession(name, live.sessionId, { type: "agent_message", text: reply });
+      this.logToSession(name, live.sessionId, { type: "agent_message", text: reply, replyTo: sender });
       this.persistState();
 
-      if (live.state.messageCount === 1 && !live.state.sessionName) {
+      if (!live.state.sessionName) {
         this.requestSessionName(name, live);
       }
 
+      // Reply routing: if message was from another agent, route reply back
+      if (sender !== "user") {
+        this.routeReplyToSender(name, sender, reply);
+      }
+
+      this.finishProcessing(name, live);
       return reply;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -305,15 +338,64 @@ export class FleetManager {
         live.session = null;
       }
 
+      this.finishProcessing(name, live);
+
       if (isTimeout) {
-        this.processing.delete(name);
         return `⚠️ Agent "${name}" timed out. Session closed. Send another message to auto-recover.`;
       }
 
       throw err;
-    } finally {
-      this.processing.delete(name);
     }
+  }
+
+  private routeReplyToSender(fromAgent: string, toAgent: string, reply: string): void {
+    const senderLive = this.agents.get(toAgent);
+    if (!senderLive) {
+      console.log(`[fleet] reply routing: sender "${toAgent}" no longer exists, skipping`);
+      return;
+    }
+
+    // Log the reply in the sender's session
+    this.logToSession(toAgent, senderLive.sessionId, {
+      type: "peer_reply",
+      from: fromAgent,
+      text: reply,
+    });
+
+    // Notify via callback (Telegram notification)
+    if (this.replyRoutingCallback) {
+      this.replyRoutingCallback(fromAgent, toAgent, reply);
+    }
+
+    console.log(`[fleet] reply routed: ${fromAgent} → ${toAgent} (${reply.length} chars)`);
+  }
+
+  private finishProcessing(name: string, live: LiveAgent): void {
+    live.processing = false;
+    // Process next queued message if any
+    if (live.messageQueue.length > 0) {
+      const next = live.messageQueue.shift()!;
+      console.log(`[fleet] ${name}: dequeuing message from ${next.sender} (remaining: ${live.messageQueue.length})`);
+      this.processMessage(name, live, next.text, next.sender)
+        .then(next.resolve)
+        .catch(next.reject);
+    }
+  }
+
+  private buildSessionContext(name: string, sessionsDir: string): string {
+    const isDispatcher = name === "_dispatcher";
+    const live = this.agents.get(name);
+    const lines = [
+      `You are agent "${name}" running in workspace: ${live?.state.workspacePath}`,
+      `Your session history is stored at: ${sessionsDir}`,
+      `Each file is a JSONL log (one JSON object per line with ts, type, text fields).`,
+      `If the user asks to recall/search past conversations, read or grep these files.`,
+      "",
+      `Messages from other agents are prefixed with [from:agentname]. Respond naturally.`,
+      "",
+      getToolInstructions(isDispatcher),
+    ];
+    return lines.join("\n");
   }
 
   private requestSessionName(name: string, live: LiveAgent): void {
@@ -370,7 +452,7 @@ export class FleetManager {
       return `Agent "${name}" not found.`;
     }
 
-    if (this.processing.has(name)) {
+    if (live.processing) {
       return `Agent "${name}" is busy. Wait for it to finish.`;
     }
 
@@ -428,7 +510,7 @@ export class FleetManager {
   }
 
   isProcessing(name: string): boolean {
-    return this.processing.has(name);
+    return this.agents.get(name)?.processing ?? false;
   }
 
   getStatus(): { agents: AgentState[]; total: number; working: number; idle: number; dead: number } {
@@ -454,6 +536,21 @@ export class FleetManager {
     return this.agents.has(name);
   }
 
+  addWorkspace(alias: string, path: string): string {
+    const result = addWorkspaceToState(alias, path);
+    if (!result.startsWith("Error")) {
+      // Update in-memory workspace list
+      const existing = this.config.workspaces.find((w) => w.alias === alias);
+      if (existing) {
+        existing.path = path;
+      } else {
+        this.config.workspaces.push({ alias, path });
+      }
+      this.bus.publish("status_change", "_system", "", { event: "workspace_added", alias, path });
+    }
+    return result;
+  }
+
   async restore(): Promise<void> {
     const saved = loadFleetState();
     if (!Object.keys(saved.agents).length) return;
@@ -476,6 +573,8 @@ export class FleetManager {
         runtime: runtimeInstance,
         session: null,
         sessionId: agentState.currentSessionId,
+        messageQueue: [],
+        processing: false,
       });
 
       console.log(`[fleet] restored "${name}" (${agentState.runtime} · ${agentState.workspace})`);

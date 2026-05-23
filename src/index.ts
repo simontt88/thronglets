@@ -10,6 +10,8 @@ import { startServer } from "./server/index.js";
 import { setupInlineButtons, sendNewPrompt, sendChangePrompt, sendKillPrompt, sendClearPrompt } from "./transports/telegram-buttons.js";
 import type { Transport } from "./transports/interface.js";
 import type { Runtime } from "./runtimes/interface.js";
+import { startDispatcher, getDispatcherConfig, DISPATCHER_AGENT_NAME } from "./fleet/dispatcher.js";
+import { createPostReplyHook } from "./fleet/tools.js";
 import { homedir } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -165,6 +167,23 @@ async function main() {
   // Restore fleet from disk
   await fleet.restore();
 
+  // Wire fleet tools post-reply hook
+  fleet.setPostReplyHook(createPostReplyHook(fleet, workspaces));
+
+  // Wire reply routing notifications (agent-to-agent replies → Telegram)
+  let notifyChatId: string | null = null;
+  fleet.onReplyRouted((fromAgent, toAgent, reply) => {
+    const truncated = reply.length > 200 ? reply.slice(0, 200) + "…" : reply;
+    const notification = `[${fromAgent} → ${toAgent}] ${truncated}`;
+    if (notifyChatId) {
+      transport.sendReply(notifyChatId, notification).catch(() => {});
+    }
+  });
+
+  // Start dispatcher (if enabled in config)
+  const dispatcherConfig = getDispatcherConfig(config);
+  await startDispatcher(fleet, bus, config, workspaces);
+
   // Start HTTP + WebSocket server
   const { port } = startServer(fleet, bus, config, workspaces);
 
@@ -176,6 +195,8 @@ async function main() {
 
   transport.onMessage(async (msg) => {
     const { chatId, text } = msg;
+    // Track last active chat for inter-agent notifications
+    notifyChatId = chatId;
 
     // ── Command handling ──────────────────────────────────────
     if (msg.isCommand) {
@@ -290,17 +311,20 @@ async function main() {
             await transport.sendReply(chatId, "No agents running.\nSpawn one: /new <name> <runtime> <workspace>");
             return;
           }
-          const lines = status.agents.map((a) => {
-            const dot = a.status === "working" ? "\u25CF"
-              : a.status === "error" ? "\u2716"
-              : a.status === "dead" ? "\u{1F480}"
-              : "\u25CB";
-            const age = timeSince(a.lastActivity);
-            const sn = a.sessionName ? ` 「${a.sessionName}」` : "";
-            return `${dot} ${a.name}${sn} — ${a.runtime} · ${a.workspace} — ${a.status} (${age})`;
-          });
+          const lines = status.agents
+            .filter((a) => a.name !== "_dispatcher")
+            .map((a) => {
+              const dot = a.status === "working" ? "\u{1F7E2}"
+                : a.status === "error" ? "\u{1F534}"
+                : a.status === "dead" ? "\u{1F480}"
+                : "\u26AA";
+              const activity = a.inferred && a.status === "working"
+                ? a.inferred.replace("processing message from ", "← ")
+                : a.sessionName || a.workspace;
+              return `${dot} **${a.name}**  ${activity}`;
+            });
           const deadInfo = status.dead ? `, ${status.dead} dead` : "";
-          const header = `Fleet: ${status.total} agents (${status.working} working, ${status.idle} idle${deadInfo})`;
+          const header = `\u{1F916} Fleet: ${status.total - 1} agents (${status.working} working, ${status.idle} idle${deadInfo})`;
           await transport.sendReply(chatId, `${header}\n\n${lines.join("\n")}`);
           return;
         }
@@ -390,9 +414,10 @@ async function main() {
       return;
     }
 
-    // ── No @mention: route to single agent or prompt user ──
-    const agentList = fleet.listAgents();
-    if (agentList.length === 1) {
+    // ── No @mention: route to single agent, dispatcher, or prompt user ──
+    const agentList = fleet.listAgents().filter((n) => n !== DISPATCHER_AGENT_NAME);
+    if (agentList.length === 1 && !dispatcherConfig.enabled) {
+      // Single agent, no dispatcher — direct send
       const target = agentList[0];
       await transport.sendTyping(chatId);
       const typingInterval = setInterval(() => { transport.sendTyping(chatId).catch(() => {}); }, 4000);
@@ -408,8 +433,24 @@ async function main() {
       } finally {
         clearInterval(typingInterval);
       }
-    } else if (agentList.length === 0) {
+    } else if (agentList.length === 0 && !fleet.hasAgent(DISPATCHER_AGENT_NAME)) {
       await transport.sendReply(chatId, "No agents running.\n\nSpawn one: /new <name> [runtime] [workspace]\nExample: /new alpha cursor vs");
+    } else if (dispatcherConfig.enabled && fleet.hasAgent(DISPATCHER_AGENT_NAME)) {
+      // Dispatcher enabled — route unmentioned messages to dispatcher
+      await transport.sendTyping(chatId);
+      const typingInterval = setInterval(() => { transport.sendTyping(chatId).catch(() => {}); }, 4000);
+      const startTime = Date.now();
+      try {
+        const reply = await fleet.send(DISPATCHER_AGENT_NAME, text);
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        await transport.sendReply(chatId, `[dispatcher · ${elapsed}s]\n${reply}`);
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        await transport.sendReply(chatId, `[dispatcher · ${elapsed}s · error]\n${errMsg.slice(0, 500)}`);
+      } finally {
+        clearInterval(typingInterval);
+      }
     } else {
       await transport.sendReply(chatId, `Multiple agents running. Use @name to address one:\n${agentList.map((n) => `  @${n}`).join("\n")}\n  @all (broadcast)`);
     }

@@ -8,8 +8,9 @@ export function WorkspaceHeader() {
   const working = filtered.filter((a) => a.status === "working").length;
   const errors = filtered.filter((a) => a.status === "error").length;
   const idle = filtered.filter((a) => a.status === "idle").length;
+  const dead = filtered.filter((a) => a.status === "stopped").length;
 
-  const title = currentWorkspace === "all" ? "All Agents" : currentWorkspace;
+  const title = currentWorkspace === "all" ? "All Thronglets" : currentWorkspace;
   const wsEntry = workspaces.find((w) => w.alias === currentWorkspace);
   const wsPath = wsEntry?.path || (currentWorkspace === "all" ? "" : "");
 
@@ -17,21 +18,22 @@ export function WorkspaceHeader() {
     <div className="ws-header">
       <div className="h-block">
         <div className="crumb">
-          <span>workspace</span>
+          <span>habitat</span>
           <span className="sep">/</span>
           <span>{title.toUpperCase()}</span>
         </div>
         <div className="h-title">
           {title}
-          <span className="h-sub">{filtered.length} agent{filtered.length !== 1 ? "s" : ""}</span>
+          <span className="h-sub">{filtered.length} thronglet{filtered.length !== 1 ? "s" : ""}</span>
         </div>
         {wsPath && <div className="h-path">{wsPath}</div>}
       </div>
       <div className="h-stats">
         <span><span className="v">{filtered.length}</span>total</span>
-        <span><span className="v">{working}</span>working</span>
-        <span><span className="v">{errors}</span>errors</span>
-        <span><span className="v">{idle}</span>idle</span>
+        <span><span className="v">{working}</span>grinding</span>
+        <span><span className="v">{errors}</span>sad</span>
+        <span><span className="v">{idle}</span>vibing</span>
+        {dead > 0 && <span><span className="v">{dead}</span>dead 💀</span>}
       </div>
       <div className="stage-toolbar">
         <div className="tb-group">
@@ -42,13 +44,13 @@ export function WorkspaceHeader() {
         <div className="tb-group">
           <button className="tb-btn primary" onClick={() => setSpawnDialogOpen(true)}>
             <Icon name="plus" size={12} />
-            <span>Spawn</span>
+            <span>Hatch</span>
           </button>
         </div>
         <div className="tb-group">
           <button className={"tb-btn" + (dispatcherOpen ? " primary" : "")} onClick={toggleDispatcher}>
             <Icon name="dispatch" size={12} />
-            <span>Dispatcher</span>
+            <span>Habitat</span>
           </button>
         </div>
       </div>

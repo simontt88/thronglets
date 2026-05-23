@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { useFleetStore, sendMessage, killAgent, clearAgent, spawnAgent } from "../stores/fleet";
 import { Icon } from "./Icons";
-import { getAgentColor, getAgentGlyph } from "../lib/constants";
 
 interface Command {
   id: string;
@@ -36,11 +35,11 @@ export function CommandBar() {
 
     cmds.push({
       id: "spawn",
-      label: "Spawn new agent",
+      label: "Hatch new Thronglet",
       detail: "Ctrl+N",
       icon: "plus",
       action: () => { setCommandBarOpen(false); setSpawnDialogOpen(true); },
-      keywords: "new create add agent spawn",
+      keywords: "new create add agent spawn hatch thronglet",
     });
 
     for (const a of agents) {
@@ -107,10 +106,10 @@ export function CommandBar() {
 
     cmds.push({
       id: "toggle-dispatcher",
-      label: "Toggle dispatcher panel",
+      label: "Toggle habitat panel",
       icon: "dispatch",
       action: () => { toggleDispatcher(); setCommandBarOpen(false); },
-      keywords: "dispatcher panel toggle show hide",
+      keywords: "dispatcher habitat panel toggle show hide",
     });
 
     return cmds;

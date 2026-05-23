@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { getAgentColor } from "../lib/constants";
+import { getAgentColor, PALETTE } from "../lib/constants";
 
 export interface AgentState {
   name: string;
@@ -7,7 +7,7 @@ export interface AgentState {
   model: string;
   workspace: string;
   workspacePath: string;
-  status: "idle" | "working" | "error" | "stopped";
+  status: "idle" | "working" | "error" | "stopped" | "dead";
   currentSessionId: string;
   spawnedAt: string;
   lastActivity: string;
@@ -377,6 +377,11 @@ export async function changeAgent(name: string, field: string, value: string) {
 }
 
 export function getAgentAccent(agent: AgentState): string {
-  const overrides = useFleetStore.getState().colorOverrides;
-  return overrides[agent.name] || getAgentColor(agent.runtime);
+  const store = useFleetStore.getState();
+  const overrides = store.colorOverrides;
+  if (overrides[agent.name]) return overrides[agent.name];
+
+  const agents = store.agents.filter((a) => a.name !== "_dispatcher");
+  const idx = agents.findIndex((a) => a.name === agent.name);
+  return idx >= 0 ? PALETTE[idx % PALETTE.length] : getAgentColor(agent.runtime);
 }

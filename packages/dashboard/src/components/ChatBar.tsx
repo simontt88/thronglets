@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { useFleetStore, sendMessage } from "../stores/fleet";
-import { getAgentGlyph, STATUS_META, getAgentColor } from "../lib/constants";
+import { STATUS_META, getAgentColor } from "../lib/constants";
+import { PixelThronglet } from "./PixelThronglet";
+import { generateThronglet, statusToMood } from "../lib/thronglet";
 import { Icon } from "./Icons";
 
 export function ChatBar() {
@@ -11,7 +13,7 @@ export function ChatBar() {
   const [text, setText] = useState("");
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [sending, setSending] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const selectorRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -52,7 +54,11 @@ export function ChatBar() {
       if (dispatcher) {
         sendMessage("_dispatcher", trimmed);
       } else {
-        sendMessage(agents[0]?.name || "", trimmed);
+        // No dispatcher agent — show error, don't silently route elsewhere
+        console.warn("[chatbar] _dispatcher not found, message not sent");
+        setText(trimmed);
+        setSending(false);
+        return;
       }
     } else {
       sendMessage(activeAgent, trimmed);
@@ -63,7 +69,7 @@ export function ChatBar() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
+    if (e.key === "Enter" && e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
@@ -102,7 +108,7 @@ export function ChatBar() {
           {selectorOpen && (
             <div className="agent-selector-dropdown">
               <div className="asd-head">Send to</div>
-              {agents.map((a) => {
+              {agents.filter((a) => a.name !== "_dispatcher").map((a) => {
                 const meta = STATUS_META[a.status] || STATUS_META.idle;
                 return (
                   <button
@@ -110,8 +116,10 @@ export function ChatBar() {
                     className={"asd-item" + (activeAgent === a.name ? " active" : "")}
                     onClick={() => { setActiveAgent(a.name); setSelectorOpen(false); inputRef.current?.focus(); }}
                   >
-                    <span className="asd-glyph" style={{ background: getAgentColor(a.runtime) }}>{getAgentGlyph(a.runtime)}</span>
-                    <span className="asd-name">@{a.name}</span>
+                    <span className="asd-glyph" style={{ background: "transparent", padding: 0 }}>
+                      <PixelThronglet spec={generateThronglet(a.name)} mood={statusToMood(a.status, a.lastActivity)} size={28} />
+                    </span>
+                    <span className="asd-name">@{generateThronglet(a.name).name}</span>
                     <span className="asd-detail">{a.sessionName ? `「${a.sessionName}」` : `${a.runtime} · ${a.workspace}`}</span>
                     <span className="asd-status-dot" style={{ background: meta.color }} />
                   </button>
@@ -139,25 +147,31 @@ export function ChatBar() {
         </div>
 
         {/* Input */}
-        <input
+        <textarea
           ref={inputRef}
           className="chatbar-input"
+          rows={1}
           placeholder={
             isWorking
-              ? `${activeAgent} is working…`
+              ? `${activeAgent} is grinding…`
               : activeAgent
-                ? `Message @${activeAgent}…`
-                : "Select an agent first…"
+                ? `Talk to @${activeAgent}… (Shift+Enter to send)`
+                : "Pick a Thronglet first…"
           }
           value={text}
-          onChange={(e) => setText(e.target.value)}
+          onChange={(e) => {
+            setText(e.target.value);
+            const el = e.target;
+            el.style.height = "auto";
+            el.style.height = Math.min(el.scrollHeight, 120) + "px";
+          }}
           onKeyDown={handleKeyDown}
           disabled={!activeAgent}
         />
 
         {/* Keyboard hint */}
         <div className="chatbar-hints">
-          <kbd>⌘K</kbd>
+          <kbd>⇧↵</kbd>
         </div>
 
         {/* Send */}

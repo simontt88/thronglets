@@ -46,3 +46,12 @@ export interface FleetState {
   version: number;
   lastUpdated: string;
 }
+
+export type MessageSender = "user" | string; // "user" or agent name
+
+export interface QueuedMessage {
+  text: string;
+  sender: MessageSender;
+  resolve: (reply: string) => void;
+  reject: (err: Error) => void;
+}

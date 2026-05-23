@@ -1,10 +1,12 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useFleetStore, fetchSessionList, fetchSessionEvents, getAgentAccent } from "../stores/fleet";
 import type { AgentState, SessionEvent } from "../stores/fleet";
-import { getAgentGlyph, STATUS_META } from "../lib/constants";
+import { STATUS_META } from "../lib/constants";
 import { renderMarkdown } from "../lib/markdown";
 import { Icon } from "./Icons";
 import { CardMenu } from "./CardMenu";
+import { PixelThronglet } from "./PixelThronglet";
+import { generateThronglet, statusToMood } from "../lib/thronglet";
 import type { Placement } from "../lib/pack";
 
 interface Props {
@@ -18,11 +20,23 @@ export function SessionCard({ agent, placement }: Props) {
     setViewingSession, clearViewingSession, fontSizes, setFontSize, setActiveAgent,
   } = useFleetStore();
 
-  const accent = getAgentAccent(agent);
-  const glyph = getAgentGlyph(agent.runtime);
+  const isDispatcher = agent.name === "_dispatcher";
+  const accent = isDispatcher ? "#7c6af7" : getAgentAccent(agent);
   const meta = STATUS_META[agent.status] || STATUS_META.idle;
   const isSelected = selectedAgent === agent.name;
   const isWorking = agent.status === "working";
+  const isDead = agent.status === "stopped" || agent.status === "dead";
+
+  // Re-tick every 60s so idle→sleeping transition happens live
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (agent.status !== "idle") return;
+    const id = setInterval(() => setTick((t) => t + 1), 60_000);
+    return () => clearInterval(id);
+  }, [agent.status]);
+
+  const mood = statusToMood(agent.status, agent.lastActivity);
+  const thronglet = useMemo(() => generateThronglet(agent.name), [agent.name]);
 
   const viewedSessionId = viewingSession[agent.name];
   const isArchived = !!(viewedSessionId && viewedSessionId !== agent.currentSessionId);
@@ -60,9 +74,11 @@ export function SessionCard({ agent, placement }: Props) {
     <div
       className={
         "session-card" +
+        (isDispatcher ? " dispatcher" : "") +
         (isWorking ? " working" : "") +
         (isSelected ? " selected" : "") +
-        (isArchived ? " archived" : "")
+        (isArchived ? " archived" : "") +
+        (isDead ? " dead" : "")
       }
       style={{
         left: placement.x,
@@ -75,15 +91,18 @@ export function SessionCard({ agent, placement }: Props) {
       } as React.CSSProperties}
       onMouseDown={() => { selectAgent(agent.name); setActiveAgent(agent.name); }}
     >
-      {/* Header */}
+      {/* Header with Thronglet */}
       <div className="card-head">
-        <div className="agent-avatar">{glyph}</div>
+        <div className="thronglet-avatar">
+          <PixelThronglet spec={thronglet} mood={mood} size={48} />
+        </div>
         <div className="head-text">
           <div className="session-name">
-            <span className="name-text">{agent.name}</span>
-            {agent.sessionName && <span className="session-tag">「{agent.sessionName}」</span>}
+            <span className="name-text">{isDispatcher ? "Orix" : agent.name}</span>
+            {isDispatcher && <span className="dispatcher-badge">DISPATCH</span>}
           </div>
           <div className="session-codename">{agent.runtime} · {agent.model}</div>
+          {!isDispatcher && agent.sessionName && <span className="session-tag">「{agent.sessionName}」</span>}
         </div>
         <div className="head-actions">
           <div className="font-controls">
@@ -110,9 +129,9 @@ export function SessionCard({ agent, placement }: Props) {
       {/* Status */}
       <div className="status-row">
         {isArchived ? (
-          <span className="archived-badge">ARCHIVED</span>
+          <span className="archived-badge">💀 ARCHIVED</span>
         ) : (
-          <span className={"status-chip" + (isWorking ? " working" : "")}>
+          <span className={"status-chip" + (isWorking ? " working" : "") + (isDead ? " dead" : "")}>
             <span className="sdot"></span>
             {meta.label}
           </span>
@@ -120,15 +139,15 @@ export function SessionCard({ agent, placement }: Props) {
         <span className="inferred-text">{agent.inferred || agent.workspacePath || `${agent.messageCount} msgs`}</span>
       </div>
 
-      {/* Conversation — the main focus */}
+      {/* Conversation */}
       <div className="conversation-area" ref={scrollRef}>
         {events.length > 0 ? (
           events.map((ev, i) => (
-            <MessageBubble key={i} event={ev} accent={accent} />
+            <MessageBubble key={i} event={ev} accent={accent} isDispatcher={isDispatcher} />
           ))
         ) : (
           <div className="conversation-empty">
-            {isArchived ? "No messages in this session" : "Waiting for first message…"}
+            {isArchived ? "This Thronglet's memories are archived…" : isDead ? "This Thronglet has passed on… 🪦" : "Waiting for first interaction… 🥚"}
           </div>
         )}
         {isWorking && !isArchived && (
@@ -147,16 +166,14 @@ export function SessionCard({ agent, placement }: Props) {
       {/* Session picker dropdown */}
       {showSessionPicker && (
         <div className="session-dropdown" onMouseDown={(e) => e.stopPropagation()}>
-          <div className="session-dropdown-head">Sessions for {agent.name}</div>
-          {/* Always show the active session first */}
+          <div className="session-dropdown-head">Lives of {agent.name}</div>
           <button
             className={"session-dropdown-item" + ((!viewedSessionId || viewedSessionId === agent.currentSessionId) ? " active" : "")}
             onClick={() => handleSessionSwitch(agent.currentSessionId)}
           >
             <span className="session-dropdown-id">{agent.currentSessionId}</span>
-            <span className="session-dropdown-badge">active</span>
+            <span className="session-dropdown-badge">current life</span>
           </button>
-          {/* Archived sessions */}
           {sessions
             .filter((sid) => sid !== agent.currentSessionId)
             .map((sid) => (
@@ -169,7 +186,7 @@ export function SessionCard({ agent, placement }: Props) {
               </button>
             ))}
           {sessions.filter((s) => s !== agent.currentSessionId).length === 0 && (
-            <div style={{ padding: "6px 8px", fontSize: "10.5px", color: "var(--t-4)" }}>No archived sessions</div>
+            <div style={{ padding: "6px 8px", fontSize: "10.5px", color: "var(--t-4)" }}>No past lives</div>
           )}
         </div>
       )}
@@ -188,7 +205,7 @@ export function SessionCard({ agent, placement }: Props) {
   );
 }
 
-function MessageBubble({ event, accent }: { event: SessionEvent; accent: string }) {
+function MessageBubble({ event, accent, isDispatcher }: { event: SessionEvent; accent: string; isDispatcher?: boolean }) {
   const isUser = event.type === "user_message";
   const isError = event.type === "error";
   const text = event.text || event.error || "";
@@ -197,7 +214,7 @@ function MessageBubble({ event, accent }: { event: SessionEvent; accent: string 
 
   return (
     <div className={`msg-row ${isUser ? "msg-user" : "msg-agent"}${isError ? " msg-error" : ""}`}>
-      <div className="msg-label">{isUser ? "▶ you" : isError ? "✕ error" : "◀ agent"}</div>
+      <div className="msg-label">{isUser ? "▶ you" : isError ? "✕ error" : isDispatcher ? "⚡ dispatch" : "◀ thronglet"}</div>
       <div className="msg-body">
         {isUser ? text : renderMarkdown(text)}
       </div>
