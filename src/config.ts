@@ -43,6 +43,13 @@ export interface SessionConfig {
   recallKey?: string;
 }
 
+export interface DispatcherDef {
+  enabled?: boolean;
+  runtime?: RuntimeType;
+  model?: string;
+  workspace?: string;
+}
+
 export interface BridgeConfig {
   transport: TransportType;
   workspace: string;
@@ -56,9 +63,10 @@ export interface BridgeConfig {
 
   permissions?: { mode: PermissionMode };
   session?: SessionConfig;
+  dispatcher?: DispatcherDef;
 }
 
-const GLOBAL_CONFIG_DIR = join(homedir(), ".kenyalang");
+const GLOBAL_CONFIG_DIR = process.env.KENYALANG_HOME || join(homedir(), ".kenyalang");
 const GLOBAL_CONFIG_PATH = join(GLOBAL_CONFIG_DIR, "config.yaml");
 
 function resolveEnvVars(value: string): string {
@@ -145,6 +153,7 @@ export function loadConfig(): BridgeConfig {
   const rawDiscord = resolved.discord as Record<string, unknown> | undefined;
   const rawSession = resolved.session as Record<string, unknown> | undefined;
   const rawPermissions = resolved.permissions as Record<string, unknown> | undefined;
+  const rawDispatcher = resolved.dispatcher as Record<string, unknown> | boolean | undefined;
 
   const agents = parseAgents(resolved.agents);
 
@@ -187,6 +196,17 @@ export function loadConfig(): BridgeConfig {
     permissions: rawPermissions ? {
       mode: (rawPermissions.mode as PermissionMode) || "safe",
     } : { mode: "safe" },
+
+    dispatcher: rawDispatcher
+      ? typeof rawDispatcher === "boolean"
+        ? { enabled: rawDispatcher }
+        : {
+            enabled: (rawDispatcher.enabled as boolean) !== false,
+            runtime: rawDispatcher.runtime as RuntimeType | undefined,
+            model: rawDispatcher.model as string | undefined,
+            workspace: rawDispatcher.workspace as string | undefined,
+          }
+      : undefined,
 
     session: rawSession ? {
       logDir: (rawSession.log_dir || rawSession.logDir || "") as string,

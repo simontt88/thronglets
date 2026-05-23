@@ -26,15 +26,58 @@ export interface FleetManagerConfig {
   getAgentDef: (runtime: RuntimeType, model?: string) => AgentDef;
 }
 
+const SEND_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes max per message
+const HEALTH_CHECK_INTERVAL_MS = 30 * 1000; // check every 30s
+
 export class FleetManager {
   private agents = new Map<string, LiveAgent>();
   private bus: FleetEventBus;
   private config: FleetManagerConfig;
   private processing = new Set<string>();
+  private healthInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(bus: FleetEventBus, config: FleetManagerConfig) {
     this.bus = bus;
     this.config = config;
+    this.startHealthCheck();
+  }
+
+  private startHealthCheck(): void {
+    this.healthInterval = setInterval(() => this.checkAgentHealth(), HEALTH_CHECK_INTERVAL_MS);
+  }
+
+  private checkAgentHealth(): void {
+    const now = Date.now();
+    for (const [name, live] of this.agents) {
+      if (live.state.status === "working" && live.state.lastActivity) {
+        const elapsed = now - new Date(live.state.lastActivity).getTime();
+        if (elapsed > SEND_TIMEOUT_MS + 30_000) {
+          // Agent has been "working" far longer than the timeout allows — mark dead
+          live.state.status = "dead";
+          live.state.inferred = `unresponsive for ${Math.round(elapsed / 60_000)}min — marked dead`;
+          this.bus.publish("status_change", name, live.sessionId, { status: "dead" });
+          this.logToSession(name, live.sessionId, {
+            type: "health_check",
+            status: "dead",
+            elapsed_ms: elapsed,
+          });
+          this.processing.delete(name);
+          if (live.session) {
+            try { live.session.close(); } catch {}
+            live.session = null;
+          }
+          this.persistState();
+          console.log(`[fleet] ${name}: marked DEAD after ${Math.round(elapsed / 60_000)}min unresponsive`);
+        }
+      }
+    }
+  }
+
+  stopHealthCheck(): void {
+    if (this.healthInterval) {
+      clearInterval(this.healthInterval);
+      this.healthInterval = null;
+    }
   }
 
   get eventBus(): FleetEventBus {
@@ -134,10 +177,32 @@ export class FleetManager {
     return `Agent "${name}" killed. Sessions preserved on disk.`;
   }
 
+  private withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`Timeout after ${Math.round(ms / 1000)}s: ${label}`));
+      }, ms);
+      promise.then(
+        (val) => { clearTimeout(timer); resolve(val); },
+        (err) => { clearTimeout(timer); reject(err); },
+      );
+    });
+  }
+
   async send(name: string, text: string): Promise<string> {
     const live = this.agents.get(name);
     if (!live) {
       return `Agent "${name}" not found. Use /new to spawn.`;
+    }
+
+    // Auto-recover from dead/error: close stale session so a fresh one is created
+    if (live.state.status === "dead" || live.state.status === "error") {
+      console.log(`[fleet] ${name}: recovering from ${live.state.status} — creating fresh session`);
+      if (live.session) {
+        try { live.session.close(); } catch {}
+        live.session = null;
+      }
+      live.state.status = "idle";
     }
 
     if (this.processing.has(name)) {
@@ -153,7 +218,7 @@ export class FleetManager {
     this.bus.publish("user_message", name, live.sessionId, { text });
     this.logToSession(name, live.sessionId, { type: "user_message", text });
 
-    try {
+    const attemptSend = async (isRetry: boolean): Promise<string> => {
       if (!live.session) {
         const sessionsDir = getSessionsDir(name);
         const sessionContext = [
@@ -163,16 +228,50 @@ export class FleetManager {
           `If the user asks to recall/search past conversations, read or grep these files.`,
         ].join("\n");
 
-        live.session = await live.runtime.createSession({
-          cwd: live.state.workspacePath,
-          model: live.state.model,
-          context: sessionContext,
-          name: `fleet-${name}-${live.sessionId}`,
-        });
+        live.session = await this.withTimeout(
+          live.runtime.createSession({
+            cwd: live.state.workspacePath,
+            model: live.state.model,
+            context: sessionContext,
+            name: `fleet-${name}-${live.sessionId}`,
+          }),
+          60_000,
+          `${name} session creation`,
+        );
         this.bus.publish("session_started", name, live.sessionId);
       }
 
-      const reply = await live.session.send(text);
+      return this.withTimeout(
+        live.session.send(text),
+        SEND_TIMEOUT_MS,
+        `${name} send`,
+      );
+    };
+
+    try {
+      let reply: string;
+      try {
+        reply = await attemptSend(false);
+      } catch (firstErr) {
+        const firstMsg = firstErr instanceof Error ? firstErr.message : String(firstErr);
+        const isTimeout = firstMsg.includes("Timeout");
+        console.log(`[fleet] ${name}: send failed (${isTimeout ? "TIMEOUT" : "error"}), retrying with fresh session...`);
+        if (live.session) {
+          try { live.session.close(); } catch {}
+          live.session = null;
+        }
+        if (isTimeout) {
+          // Timeout = likely SDK hung; mark dead, don't retry immediately
+          live.state.status = "dead";
+          live.state.inferred = `send timed out after ${SEND_TIMEOUT_MS / 60_000}min — session closed`;
+          this.bus.publish("status_change", name, live.sessionId, { status: "dead" });
+          this.logToSession(name, live.sessionId, { type: "timeout", error: firstMsg });
+          this.persistState();
+          this.processing.delete(name);
+          return `⚠️ Agent "${name}" timed out (${SEND_TIMEOUT_MS / 60_000}min). Session closed. Send another message to auto-recover.`;
+        }
+        reply = await attemptSend(true);
+      }
 
       live.state.messageCount++;
       live.state.status = "idle";
@@ -184,25 +283,58 @@ export class FleetManager {
       this.logToSession(name, live.sessionId, { type: "agent_message", text: reply });
       this.persistState();
 
+      if (live.state.messageCount === 1 && !live.state.sessionName) {
+        this.requestSessionName(name, live);
+      }
+
       return reply;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
-      live.state.status = "error";
-      live.state.inferred = `error: ${errMsg.slice(0, 80)}`;
+      const isTimeout = errMsg.includes("Timeout");
+      live.state.status = isTimeout ? "dead" : "error";
+      live.state.inferred = isTimeout
+        ? `send timed out — session closed, send message to recover`
+        : `error: ${errMsg.slice(0, 80)}`;
+      this.bus.publish("status_change", name, live.sessionId, { status: live.state.status });
       this.bus.publish("error", name, live.sessionId, { error: errMsg });
-      this.logToSession(name, live.sessionId, { type: "error", error: errMsg });
+      this.logToSession(name, live.sessionId, { type: isTimeout ? "timeout" : "error", error: errMsg });
       this.persistState();
 
-      // Reset session on error so next message creates fresh
       if (live.session) {
         try { live.session.close(); } catch {}
         live.session = null;
+      }
+
+      if (isTimeout) {
+        this.processing.delete(name);
+        return `⚠️ Agent "${name}" timed out. Session closed. Send another message to auto-recover.`;
       }
 
       throw err;
     } finally {
       this.processing.delete(name);
     }
+  }
+
+  private requestSessionName(name: string, live: LiveAgent): void {
+    if (!live.session) return;
+    const prompt = live.state.sessionName
+      ? `当前session名是"${live.state.sessionName}"。如果话题已变，用不超过10个字重新命名；否则回复同样的名字。只回复名字本身。`
+      : "这个session还没有名字。用不超过10个字给它起个名字，概括我们在做什么。只回复名字本身，不要引号或其他内容。";
+
+    live.session.send(prompt).then((nameReply) => {
+      const raw = nameReply.trim().replace(/^["'""'']+|["'""'']+$/g, "").trim();
+      const sessionName = raw.slice(0, 20);
+      if (sessionName && sessionName.length <= 20) {
+        live.state.sessionName = sessionName;
+        this.bus.publish("session_named", name, live.sessionId, { sessionName });
+        this.logToSession(name, live.sessionId, { type: "session_named", sessionName });
+        this.persistState();
+        console.log(`[fleet] ${name}: session named "${sessionName}"`);
+      }
+    }).catch((err) => {
+      console.warn(`[fleet] ${name}: session naming failed: ${(err as Error).message?.slice(0, 60)}`);
+    });
   }
 
   async clear(name: string): Promise<string> {
@@ -223,6 +355,7 @@ export class FleetManager {
     live.state.currentSessionId = newSessionId;
     live.state.status = "idle";
     live.state.messageCount = 0;
+    live.state.sessionName = undefined;
     live.state.lastActivity = new Date().toISOString();
 
     this.bus.publish("session_cleared", name, oldSessionId, { newSessionId });
@@ -298,13 +431,14 @@ export class FleetManager {
     return this.processing.has(name);
   }
 
-  getStatus(): { agents: AgentState[]; total: number; working: number; idle: number } {
+  getStatus(): { agents: AgentState[]; total: number; working: number; idle: number; dead: number } {
     const agents = Array.from(this.agents.values()).map((a) => a.state);
     return {
       agents,
       total: agents.length,
       working: agents.filter((a) => a.status === "working").length,
       idle: agents.filter((a) => a.status === "idle").length,
+      dead: agents.filter((a) => a.status === "dead").length,
     };
   }
 
@@ -335,8 +469,10 @@ export class FleetManager {
       const agentDef = this.config.getAgentDef(agentState.runtime as RuntimeType);
       const runtimeInstance = this.config.createRuntime(agentDef);
 
+      // On restart: "working" becomes "idle" (stale), "dead"/"error" preserved for visibility
+      const restoredStatus = (agentState.status === "working") ? "idle" : agentState.status;
       this.agents.set(name, {
-        state: { ...agentState, status: "idle" },
+        state: { ...agentState, status: restoredStatus },
         runtime: runtimeInstance,
         session: null,
         sessionId: agentState.currentSessionId,

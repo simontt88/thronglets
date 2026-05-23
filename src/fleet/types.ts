@@ -1,12 +1,13 @@
 import type { RuntimeType } from "../config.js";
 
-export type AgentStatus = "idle" | "working" | "error" | "stopped";
+export type AgentStatus = "idle" | "working" | "error" | "stopped" | "dead";
 
 export type FleetEventType =
   | "agent_spawned"
   | "agent_killed"
   | "session_started"
   | "session_cleared"
+  | "session_named"
   | "user_message"
   | "agent_thinking"
   | "tool_call"
@@ -37,6 +38,7 @@ export interface AgentState {
   lastUserMessage?: string;
   lastAgentMessage?: string;
   inferred?: string;
+  sessionName?: string;
 }
 
 export interface FleetState {

@@ -1,10 +1,13 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { viteSingleFile } from "vite-plugin-singlefile";
 
-export default defineConfig({
-  plugins: [react()],
+export default defineConfig(({ mode }) => ({
+  plugins: mode === "singlefile"
+    ? [react(), viteSingleFile()]
+    : [react()],
   build: {
-    outDir: "dist",
+    outDir: mode === "singlefile" ? "dist-single" : "dist",
     emptyOutDir: true,
   },
   server: {
@@ -13,4 +16,4 @@ export default defineConfig({
       "/ws": { target: "ws://127.0.0.1:3847", ws: true },
     },
   },
-});
+}));

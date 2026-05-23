@@ -1,11 +1,15 @@
 import express from "express";
-import { join } from "path";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import type { FleetManager } from "../fleet/index.js";
 import type { BridgeConfig, RuntimeType } from "../config.js";
 import type { WorkspaceEntry } from "../fleet/index.js";
 import { readdirSync, readFileSync, existsSync } from "fs";
 import { getSessionsDir } from "../fleet/state.js";
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(join(__dirname, "../../package.json"), "utf-8"));
+const VERSION = pkg.version as string;
 const startTime = Date.now();
 
 export function createHttpApp(
@@ -16,11 +20,19 @@ export function createHttpApp(
   const app = express();
   app.use(express.json());
 
+  app.use((_req, res, next) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    if (_req.method === "OPTIONS") { res.sendStatus(204); return; }
+    next();
+  });
+
   app.get("/health", (_req, res) => {
     const status = fleet.getStatus();
     res.json({
       ok: true,
-      version: "0.5.0",
+      version: VERSION,
       uptime: Math.round((Date.now() - startTime) / 1000),
       agents: status.total,
       working: status.working,
@@ -160,6 +172,15 @@ export function createHttpApp(
     }
     const result = await fleet.clear(name);
     res.json({ message: result });
+  });
+
+  app.get("/api/dispatcher/status", (_req, res) => {
+    const dispatcher = fleet.getAgent("_dispatcher");
+    res.json({
+      enabled: !!config.dispatcher?.enabled,
+      running: !!dispatcher,
+      agent: dispatcher || null,
+    });
   });
 
   app.post("/api/fleet/change", async (req, res) => {

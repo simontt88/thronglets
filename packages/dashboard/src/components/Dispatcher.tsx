@@ -141,6 +141,7 @@ export function Dispatcher() {
                       <span className="codename">{a.runtime}</span>
                       <span className="sep">·</span>
                       <span className="name">{a.name}</span>
+                      {a.sessionName && <span className="df-session-name">「{a.sessionName}」</span>}
                     </div>
                     <div className="df-row-sub">{a.inferred || "processing..."}</div>
                     <div className="df-progress"><span className="df-progress-bar" style={{ background: getAgentAccent(a) }}></span></div>
@@ -167,6 +168,7 @@ export function Dispatcher() {
                       <span className="codename">{a.runtime}</span>
                       <span className="sep">·</span>
                       <span className="name">{a.name}</span>
+                      {a.sessionName && <span className="df-session-name">「{a.sessionName}」</span>}
                     </div>
                     <div className="df-row-sub">{a.inferred || "error"}</div>
                   </div>
@@ -192,6 +194,7 @@ export function Dispatcher() {
                       <span className="codename">{a.runtime}</span>
                       <span className="sep">·</span>
                       <span className="name">{a.name}</span>
+                      {a.sessionName && <span className="df-session-name">「{a.sessionName}」</span>}
                     </div>
                     <div className="df-row-sub">{a.inferred || "standing by"}</div>
                   </div>

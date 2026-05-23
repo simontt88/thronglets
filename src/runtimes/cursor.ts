@@ -5,20 +5,39 @@ export interface CursorRuntimeConfig {
   model: string;
 }
 
+const PER_STEP_TIMEOUT_MS = 4.5 * 60 * 1000; // 4.5 min per SDK call (before fleet-level timeout)
+
 class CursorSession implements AgentSession {
   private agent: { send: (text: string, opts?: Record<string, unknown>) => Promise<{ wait: () => Promise<{ result?: string }> }>; close: () => void };
+  private alive = true;
 
   constructor(agent: { send: (text: string, opts?: Record<string, unknown>) => Promise<{ wait: () => Promise<{ result?: string }> }>; close: () => void }) {
     this.agent = agent;
   }
 
   async send(text: string): Promise<string> {
+    if (!this.alive) {
+      throw new Error("Session already closed — create a new one");
+    }
+
     const run = await this.agent.send(text);
-    const result = await run.wait();
-    return result.result || "(no response)";
+
+    // Race the wait() against a timeout to prevent infinite hangs
+    const result = await Promise.race([
+      run.wait(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("Cursor SDK wait() hung — no response within timeout")), PER_STEP_TIMEOUT_MS)
+      ),
+    ]);
+
+    if (!result.result) {
+      throw new Error("Cursor session returned empty response — connection may be stale");
+    }
+    return result.result;
   }
 
   close(): void {
+    this.alive = false;
     try { this.agent.close(); } catch {}
   }
 }

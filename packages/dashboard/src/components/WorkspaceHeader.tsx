@@ -2,7 +2,7 @@ import { useFleetStore } from "../stores/fleet";
 import { Icon } from "./Icons";
 
 export function WorkspaceHeader() {
-  const { agents, workspaces, currentWorkspace, cols, setCols, toggleDispatcher, dispatcherOpen } = useFleetStore();
+  const { agents, workspaces, currentWorkspace, cols, setCols, toggleDispatcher, dispatcherOpen, setSpawnDialogOpen } = useFleetStore();
 
   const filtered = currentWorkspace === "all" ? agents : agents.filter((a) => a.workspace === currentWorkspace);
   const working = filtered.filter((a) => a.status === "working").length;
@@ -38,6 +38,12 @@ export function WorkspaceHeader() {
           <button className="tb-btn" onClick={() => setCols(cols - 1)}>-</button>
           <span className="tb-cols">columns<span className="num">{cols}</span></span>
           <button className="tb-btn" onClick={() => setCols(cols + 1)}>+</button>
+        </div>
+        <div className="tb-group">
+          <button className="tb-btn primary" onClick={() => setSpawnDialogOpen(true)}>
+            <Icon name="plus" size={12} />
+            <span>Spawn</span>
+          </button>
         </div>
         <div className="tb-group">
           <button className={"tb-btn" + (dispatcherOpen ? " primary" : "")} onClick={toggleDispatcher}>

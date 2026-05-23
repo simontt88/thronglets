@@ -3,7 +3,8 @@ import { join } from "path";
 import { homedir } from "os";
 import type { FleetState } from "./types.js";
 
-const FLEET_DIR = join(homedir(), ".kenyalang", "fleet");
+const KENYALANG_HOME = process.env.KENYALANG_HOME || join(homedir(), ".kenyalang");
+const FLEET_DIR = join(KENYALANG_HOME, "fleet");
 const STATE_FILE = join(FLEET_DIR, "fleet-state.json");
 
 function ensureDir(dir: string): void {

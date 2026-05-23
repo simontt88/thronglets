@@ -15,7 +15,7 @@ interface Props {
 export function SessionCard({ agent, placement }: Props) {
   const {
     selectedAgent, selectAgent, viewingSession, sessionLists, sessionEvents,
-    setViewingSession, clearViewingSession, fontSizes, setFontSize,
+    setViewingSession, clearViewingSession, fontSizes, setFontSize, setActiveAgent,
   } = useFleetStore();
 
   const accent = getAgentAccent(agent);
@@ -73,7 +73,7 @@ export function SessionCard({ agent, placement }: Props) {
         "--status-color": meta.color,
         "--card-font-size": `${fontSize}px`,
       } as React.CSSProperties}
-      onMouseDown={() => selectAgent(agent.name)}
+      onMouseDown={() => { selectAgent(agent.name); setActiveAgent(agent.name); }}
     >
       {/* Header */}
       <div className="card-head">
@@ -81,6 +81,7 @@ export function SessionCard({ agent, placement }: Props) {
         <div className="head-text">
           <div className="session-name">
             <span className="name-text">{agent.name}</span>
+            {agent.sessionName && <span className="session-tag">「{agent.sessionName}」</span>}
           </div>
           <div className="session-codename">{agent.runtime} · {agent.model}</div>
         </div>

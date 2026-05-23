@@ -2,7 +2,7 @@ import { useFleetStore } from "../stores/fleet";
 import { Icon } from "./Icons";
 
 export function TopBar() {
-  const { agents, workspaces, currentWorkspace, setWorkspace, dispatcherOpen, toggleDispatcher, theme, setTheme } = useFleetStore();
+  const { agents, workspaces, currentWorkspace, setWorkspace, dispatcherOpen, toggleDispatcher, theme, setTheme, setCommandBarOpen, setSpawnDialogOpen } = useFleetStore();
 
   const wsGroups = [
     { alias: "all", name: "All", path: "", count: agents.length },
@@ -37,10 +37,14 @@ export function TopBar() {
       </nav>
 
       <div className="topbar-right">
-        <div className="search">
+        <button className="search" onClick={() => setCommandBarOpen(true)}>
           <Icon name="search" size={13} />
-          <span>Search agents…</span>
-        </div>
+          <span>Commands…</span>
+          <span className="kbd">⌘K</span>
+        </button>
+        <button className="icon-btn" title="Spawn agent (Ctrl+N)" onClick={() => setSpawnDialogOpen(true)}>
+          <Icon name="plus" size={14} />
+        </button>
         <button
           className={"icon-btn" + (dispatcherOpen ? " on" : "")}
           title="Toggle dispatcher"

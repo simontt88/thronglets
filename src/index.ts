@@ -11,9 +11,14 @@ import { setupInlineButtons, sendNewPrompt, sendChangePrompt, sendKillPrompt, se
 import type { Transport } from "./transports/interface.js";
 import type { Runtime } from "./runtimes/interface.js";
 import { homedir } from "os";
-import { join } from "path";
+import { join, dirname } from "path";
+import { fileURLToPath } from "url";
 import { existsSync, readFileSync } from "fs";
 import { parse as parseYaml } from "yaml";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const pkg = JSON.parse(readFileSync(join(__dirname, "../package.json"), "utf-8"));
+const VERSION: string = pkg.version;
 
 const RESTART_DELAY_MS = 10000;
 
@@ -97,7 +102,8 @@ async function ensureRulesSync(agentDef: AgentDef, workspace: string) {
 }
 
 function loadWorkspaces(): WorkspaceEntry[] {
-  const wsFile = join(homedir(), ".kenyalang", "workspaces.yaml");
+  const kenyalangHome = process.env.KENYALANG_HOME || join(homedir(), ".kenyalang");
+  const wsFile = join(kenyalangHome, "workspaces.yaml");
   if (!existsSync(wsFile)) return [];
   try {
     const raw = parseYaml(readFileSync(wsFile, "utf-8"));
@@ -186,7 +192,7 @@ async function main() {
             ? `\nActive agents: ${currentFleet.join(", ")}\nSend messages directly or use @name prefix.`
             : "\nNo agents running yet. Spawn one to get started:";
           const welcome = [
-            "\u{1F916} Kenyalang v0.5.0",
+            `\u{1F916} Kenyalang v${VERSION}`,
             "",
             "Multi-agent fleet orchestrator — each agent runs in a workspace with full file/shell/git access.",
             "",
@@ -285,11 +291,16 @@ async function main() {
             return;
           }
           const lines = status.agents.map((a) => {
-            const dot = a.status === "working" ? "\u25CF" : a.status === "error" ? "\u2716" : "\u25CB";
+            const dot = a.status === "working" ? "\u25CF"
+              : a.status === "error" ? "\u2716"
+              : a.status === "dead" ? "\u{1F480}"
+              : "\u25CB";
             const age = timeSince(a.lastActivity);
-            return `${dot} ${a.name} \u2014 ${a.runtime} \u00B7 ${a.workspace} \u2014 ${a.status} (${age})`;
+            const sn = a.sessionName ? ` 「${a.sessionName}」` : "";
+            return `${dot} ${a.name}${sn} — ${a.runtime} · ${a.workspace} — ${a.status} (${age})`;
           });
-          const header = `Fleet: ${status.total} agents (${status.working} working, ${status.idle} idle)`;
+          const deadInfo = status.dead ? `, ${status.dead} dead` : "";
+          const header = `Fleet: ${status.total} agents (${status.working} working, ${status.idle} idle${deadInfo})`;
           await transport.sendReply(chatId, `${header}\n\n${lines.join("\n")}`);
           return;
         }
@@ -308,7 +319,7 @@ async function main() {
               `Model: ${agent.model}`,
               `Workspace: ${agent.workspace} (${agent.workspacePath})`,
               `Status: ${agent.status}`,
-              `Session: ${agent.currentSessionId}`,
+              `Session: ${agent.currentSessionId}${agent.sessionName ? ` 「${agent.sessionName}」` : ""}`,
               `Messages: ${agent.messageCount}`,
               `Spawned: ${agent.spawnedAt}`,
             ];
@@ -414,7 +425,7 @@ async function main() {
     }
   }
 
-  console.log(`\nKenyalang v0.5.0 (Fleet Mode)`);
+  console.log(`\nKenyalang v${VERSION} (Fleet Mode)`);
   console.log(`  Transport:   ${transport.name}`);
   console.log(`  API:         http://127.0.0.1:${port}`);
   console.log(`  WebSocket:   ws://127.0.0.1:${port}/ws`);
@@ -426,7 +437,7 @@ async function main() {
 
   setInterval(() => {
     const s = fleet.getStatus();
-    console.log(`[heartbeat] ${new Date().toISOString()} fleet=${s.total} working=${s.working}`);
+    console.log(`[heartbeat] ${new Date().toISOString()} fleet=${s.total} working=${s.working} dead=${s.dead}`);
   }, 5 * 60 * 1000);
 }
 

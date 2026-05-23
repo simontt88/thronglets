@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useFleetStore } from "../stores/fleet";
+import { useFleetStore, serverBase } from "../stores/fleet";
 import type { AgentState } from "../stores/fleet";
 import { PALETTE } from "../lib/constants";
 import { Icon } from "./Icons";
@@ -28,9 +28,9 @@ export function CardMenu({ agent, x, y, accent, onClose }: Props) {
     onClose();
     try {
       if (action === "kill") {
-        await fetch(`/api/fleet/kill`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: agent.name }) });
+        await fetch(`${serverBase.http}/api/fleet/kill`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: agent.name }) });
       } else if (action === "clear") {
-        await fetch(`/api/agents/${agent.name}/clear`, { method: "POST", headers: { "Content-Type": "application/json" } });
+        await fetch(`${serverBase.http}/api/agents/${agent.name}/clear`, { method: "POST", headers: { "Content-Type": "application/json" } });
       }
     } catch {}
   };
