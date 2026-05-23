@@ -1,13 +1,29 @@
 import { appendFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
+import { EventEmitter } from "events";
 import type { AgentDef, BridgeConfig, RuntimeType } from "../config.js";
-import type { Runtime } from "../runtimes/interface.js";
-import type { AgentSession } from "../runtimes/interface.js";
-import { FleetEventBus } from "./event-bus.js";
+import type { Runtime, AgentSession } from "../runtimes/interface.js";
 import { loadFleetState, saveFleetState, getSessionsDir, addWorkspace as addWorkspaceToState } from "./state.js";
-import { getToolInstructions } from "./tool-instructions.js";
+import { getToolInstructions } from "./tools.js";
 import { generateUniqueName } from "./naming.js";
-import type { AgentState, AgentStatus, FleetState, QueuedMessage, MessageSender } from "./types.js";
+import type { AgentState, AgentStatus, FleetEvent, FleetEventType, FleetState, QueuedMessage, MessageSender } from "./types.js";
+
+export class FleetEventBus extends EventEmitter {
+  publish(type: FleetEventType, agentName: string, sessionId: string, payload?: unknown): void {
+    const event: FleetEvent = {
+      ts: new Date().toISOString(),
+      type,
+      agentName,
+      sessionId,
+      payload,
+    };
+    super.emit("fleet_event", event);
+  }
+
+  onEvent(listener: (data: FleetEvent) => void): this {
+    return super.on("fleet_event", listener);
+  }
+}
 
 const TRAITS = ["curious", "sleepy", "eager", "chaotic", "calm", "skeptical"] as const;
 const ADJECTIVES = ["playful", "intense", "gentle", "wild", "stoic", "witty", "shy", "bold"] as const;
@@ -369,6 +385,13 @@ export class FleetManager {
         live.session = null;
       }
 
+      // Forward error to dispatcher so it can react (reassign, restart, etc.)
+      if (name !== "_dispatcher" && this.agents.has("_dispatcher")) {
+        const briefErr = errMsg.length > 200 ? errMsg.slice(0, 200) + "…" : errMsg;
+        this.send("_dispatcher", `Agent "${name}" encountered an error: ${briefErr}\nStatus: ${live.state.status}. Please advise or reassign the task.`, name)
+          .catch((e) => console.warn(`[fleet] failed to notify dispatcher of ${name} error: ${(e as Error).message?.slice(0, 60)}`));
+      }
+
       this.finishProcessing(name, live);
 
       if (isTimeout) {
@@ -426,8 +449,9 @@ export class FleetManager {
     const titleStr = live.state.title ? ` — ${live.state.title}` : "";
     const personality = live.state.personality || "curious";
     return [
-      `[SYSTEM] You are "${name}"${titleStr}. Personality: ${personality}.`,
-      `You are a thronglet in the Thronglets fleet. Your session logs: ${sessionsDir}`,
+      `[SYSTEM] Your name is "${name}"${titleStr}. You ARE ${name}. Never refer to yourself in third person — you are the one doing the work, not delegating to yourself.`,
+      `Personality: ${personality}.`,
+      `You are a thronglet (coding agent) in the Thronglets fleet. Your session logs: ${sessionsDir}`,
       `Messages from other agents are prefixed [from:name]. Messages from the dispatcher are [from:_dispatcher]. Messages from the human master have no prefix.`,
       "",
       getToolInstructions(false),

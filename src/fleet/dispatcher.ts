@@ -1,5 +1,5 @@
 import type { FleetManager, WorkspaceEntry } from "./manager.js";
-import type { FleetEventBus } from "./event-bus.js";
+import type { FleetEventBus } from "./manager.js";
 import type { BridgeConfig, RuntimeType } from "../config.js";
 
 const DISPATCHER_NAME = "_dispatcher";

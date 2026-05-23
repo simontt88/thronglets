@@ -134,8 +134,8 @@ export function ChatBar() {
                     <span className="asd-glyph" style={{ background: "transparent", padding: 0 }}>
                       <PixelThronglet spec={generateThronglet(a.name)} mood={statusToMood(a.status, a.lastActivity)} size={28} />
                     </span>
-                    <span className="asd-name">@{generateThronglet(a.name).name}</span>
-                    <span className="asd-detail">{a.sessionName ? `「${a.sessionName}」` : `${a.runtime} · ${a.workspace}`}</span>
+                    <span className="asd-name">@{a.name}</span>
+                    <span className="asd-detail">{a.runtime} · {a.workspace}</span>
                     <span className="asd-status-dot" style={{ background: meta.color }} />
                   </button>
                 );

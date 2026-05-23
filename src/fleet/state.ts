@@ -60,9 +60,9 @@ export function loadWorkspaces(): WorkspaceEntry[] {
       }));
     }
     // Handle object format: { alias1: { path: "..." }, alias2: "/path" }
-    return Object.entries(ws).map(([alias, val]: [string, any]) => ({
+    return Object.entries(ws).map(([alias, val]) => ({
       alias,
-      path: typeof val === "string" ? val : val.path,
+      path: typeof val === "string" ? val : (val as { path: string }).path,
     }));
   } catch {
     return [];

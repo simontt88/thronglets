@@ -425,6 +425,11 @@ body.theme-dark .aurora::before {
   color: var(--t-3);
 }
 .msg-row.msg-user .msg-label { color: color-mix(in oklab, var(--accent) 70%, var(--t-1)); }
+.msg-row.msg-peer {
+  background: color-mix(in oklab, #7c6af7 6%, var(--bg-2));
+  border-color: color-mix(in oklab, #7c6af7 14%, var(--border-1));
+}
+.msg-row.msg-peer .msg-label { color: #9b8afb; }
 .msg-row.msg-error .msg-label { color: var(--st-error); }
 .msg-body {
   color: var(--t-1); word-break: break-word;

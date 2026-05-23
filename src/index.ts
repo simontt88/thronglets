@@ -1,9 +1,10 @@
-import { loadConfig, getAgentByName, type BridgeConfig, type AgentDef, type RuntimeType } from "./config.js";
+import { loadConfig, type BridgeConfig, type AgentDef, type RuntimeType } from "./config.js";
 import { TelegramTransport } from "./transports/telegram.js";
 import { CursorRuntime } from "./runtimes/cursor.js";
 import { ClaudeCodeRuntime } from "./runtimes/claude-code.js";
 import { CodexRuntime } from "./runtimes/codex.js";
 import { FleetManager, FleetEventBus } from "./fleet/index.js";
+import { loadWorkspaces as loadWorkspacesFromState } from "./fleet/state.js";
 import type { WorkspaceEntry } from "./fleet/index.js";
 import { syncRules } from "./rules-sync.js";
 import { startServer } from "./server/index.js";
@@ -12,11 +13,9 @@ import type { Transport } from "./transports/interface.js";
 import type { Runtime } from "./runtimes/interface.js";
 import { startDispatcher, getDispatcherConfig, DISPATCHER_AGENT_NAME } from "./fleet/dispatcher.js";
 import { createPostReplyHook } from "./fleet/tools.js";
-import { homedir } from "os";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { existsSync, readFileSync } from "fs";
-import { parse as parseYaml } from "yaml";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, "../package.json"), "utf-8"));
@@ -104,23 +103,7 @@ async function ensureRulesSync(agentDef: AgentDef, workspace: string) {
 }
 
 function loadWorkspaces(): WorkspaceEntry[] {
-  const throngletsHome = process.env.THRONGLETS_HOME || join(homedir(), ".thronglets");
-  const wsFile = join(throngletsHome, "workspaces.yaml");
-  if (!existsSync(wsFile)) return [];
-  try {
-    const raw = parseYaml(readFileSync(wsFile, "utf-8"));
-    if (!raw?.workspaces) return [];
-    const ws = raw.workspaces;
-    if (Array.isArray(ws)) {
-      return ws.map((w: any) => ({ alias: w.alias, path: w.path }));
-    }
-    return Object.entries(ws).map(([alias, val]: [string, any]) => ({
-      alias,
-      path: val.path || val,
-    }));
-  } catch {
-    return [];
-  }
+  return loadWorkspacesFromState();
 }
 
 const DISPATCHER_ALIASES = new Set(["D", "d", "dispatch", "dispatcher", "orix"]);
@@ -180,15 +163,8 @@ async function main() {
   // Wire fleet tools post-reply hook
   fleet.setPostReplyHook(createPostReplyHook(fleet, workspaces));
 
-  // Wire reply routing notifications (agent-to-agent replies → Telegram)
+  // Track last active chat for user-facing replies
   let notifyChatId: string | null = null;
-  fleet.onReplyRouted((fromAgent, toAgent, reply) => {
-    const truncated = reply.length > 200 ? reply.slice(0, 200) + "…" : reply;
-    const notification = `[${fromAgent} → ${toAgent}] ${truncated}`;
-    if (notifyChatId) {
-      transport.sendReply(notifyChatId, notification).catch(() => {});
-    }
-  });
 
   // Start dispatcher (if enabled in config)
   const dispatcherConfig = getDispatcherConfig(config);
@@ -227,29 +203,21 @@ async function main() {
             "",
             "Your thronglet fleet — each creature runs in a workspace with full coding powers.",
             "",
-            "🚀 Quick Start:",
-            "  /new — hatch a thronglet (auto-named)",
-            "  Then just type a message — it goes to your thronglet.",
+            "💬 How to talk:",
+            "  Just type — dispatcher routes it for you",
+            "  @name msg — send directly to a thronglet",
+            "  @all msg — broadcast to all",
             "",
             "📋 Commands:",
             "  /new [name] [runtime] [workspace] — hatch a thronglet",
             "  /kill <name> — release a thronglet",
-            "  /change <name> <field> <value> — reconfigure",
-            "  /clear <name> — fresh session (keep thronglet)",
             "  /fleet — list all thronglets + status",
-            "  /status <name> — thronglet detail",
-            "  /title <name> <title> — set thronglet title",
-            "  /workspace [add alias path] — list or add workspaces",
+            "  /clear <name> — fresh session",
+            "  /title <name> <title> — set title",
+            "  /change <name> <field> <value> — reconfigure",
             "  /dispatcher [restart] — dispatcher info / restart",
             "",
-            "💬 Messaging:",
-            "  Just type — auto-routes via dispatcher",
-            "  @name msg — route to a specific thronglet",
-            "  @D msg — route to dispatcher (also @d, @orix)",
-            "  @all msg — broadcast to all",
-            "",
             `⚙️ Runtimes:\n${runtimes}`,
-            "",
             `📁 Workspaces:\n${wsList}`,
             fleetLine,
           ].join("\n");
@@ -448,21 +416,20 @@ async function main() {
 
         case "/help":
           await transport.sendReply(chatId, [
-            "Thronglets Commands:",
-            "  /new [runtime] [workspace] — hatch a thronglet",
-            "  /kill <name> — release a thronglet",
-            "  /clear <name> — archive session, fresh start",
-            "  /fleet — show all thronglets + status",
-            "  /status [name] — thronglet detail",
-            "  /title <name> <title> — set thronglet title",
-            "  /dispatcher [restart] — dispatcher status / restart",
-            "  /workspace [add alias path] — list or add workspaces",
+            "💬 Just type — dispatcher handles routing",
+            "  @name msg — send to a specific thronglet",
+            "  @all msg — broadcast to all",
             "",
-            "Messaging:",
-            "  @name message — send to specific thronglet",
-            "  @D message — route to dispatcher (also @d, @orix)",
-            "  @all message — broadcast to all",
-            "  (no @) — auto-route via dispatcher",
+            "📋 Commands:",
+            "  /new [name] [runtime] [workspace] — hatch",
+            "  /kill <name> — release",
+            "  /fleet — list all + status",
+            "  /clear <name> — fresh session",
+            "  /title <name> <title> — set title",
+            "  /change <name> <field> <value> — reconfigure",
+            "  /status [name] — detail",
+            "  /dispatcher [restart] — dispatcher info",
+            "  /workspace [add alias path] — manage workspaces",
             "",
             `Runtimes: ${config.agents.map((a) => a.runtime).join(", ")}`,
             `Workspaces: ${workspaces.map((w) => w.alias).join(", ")}`,

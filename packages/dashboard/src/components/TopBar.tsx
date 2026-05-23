@@ -5,7 +5,7 @@ import { PixelThronglet } from "./PixelThronglet";
 import { generateThronglet } from "../lib/thronglet";
 
 export function TopBar() {
-  const { agents, workspaces, currentWorkspace, setWorkspace, theme, setTheme, setCommandBarOpen, setSpawnDialogOpen } = useFleetStore();
+  const { agents, workspaces, currentWorkspace, setWorkspace, theme, setTheme, toggleDispatcher } = useFleetStore();
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState("");
 
@@ -66,13 +66,8 @@ export function TopBar() {
       </nav>
 
       <div className="topbar-right">
-        <button className="search" onClick={() => setCommandBarOpen(true)}>
-          <Icon name="search" size={13} />
-          <span>Commands…</span>
-          <span className="kbd">⌘K</span>
-        </button>
-        <button className="icon-btn" title="Hatch new Thronglet (Ctrl+N)" onClick={() => setSpawnDialogOpen(true)}>
-          <Icon name="plus" size={14} />
+        <button className="icon-btn" title="Fleet status panel" onClick={() => toggleDispatcher()}>
+          <Icon name="dispatch" size={14} />
         </button>
         <button className="icon-btn" title="Toggle theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
           <Icon name="settings" size={14} />

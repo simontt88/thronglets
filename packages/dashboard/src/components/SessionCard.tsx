@@ -234,18 +234,31 @@ export function SessionCard({ agent, placement }: Props) {
   );
 }
 
+function parseSender(text: string): { sender: string | null; body: string } {
+  const m = text.match(/^\[from:(\w+)\]\s*/);
+  if (m) return { sender: m[1], body: text.slice(m[0].length) };
+  return { sender: null, body: text };
+}
+
 function MessageBubble({ event, accent, isDispatcher }: { event: SessionEvent; accent: string; isDispatcher?: boolean }) {
   const isUser = event.type === "user_message";
   const isError = event.type === "error";
-  const text = event.text || event.error || "";
+  const rawText = event.text || event.error || "";
 
-  if (!text) return null;
+  if (!rawText) return null;
+
+  const { sender, body } = isUser ? parseSender(rawText) : { sender: null, body: rawText };
+  const isFromAgent = isUser && sender !== null;
+  const displayName = isFromAgent
+    ? (sender === "_dispatcher" ? "Orix" : sender)
+    : isUser ? "you" : isError ? "error" : isDispatcher ? "Orix" : "thronglet";
+  const labelIcon = isFromAgent ? "◆" : isUser ? "▶" : isError ? "✕" : "◀";
 
   return (
-    <div className={`msg-row ${isUser ? "msg-user" : "msg-agent"}${isError ? " msg-error" : ""}`}>
-      <div className="msg-label">{isUser ? "▶ you" : isError ? "✕ error" : isDispatcher ? "⚡ dispatch" : "◀ thronglet"}</div>
+    <div className={`msg-row ${isUser ? "msg-user" : "msg-agent"}${isError ? " msg-error" : ""}${isFromAgent ? " msg-peer" : ""}`}>
+      <div className="msg-label">{labelIcon} {displayName}</div>
       <div className="msg-body">
-        {isUser ? text : renderMarkdown(text)}
+        {isUser ? body : renderMarkdown(body)}
       </div>
       <div className="msg-time">{formatTime(event.ts)}</div>
     </div>

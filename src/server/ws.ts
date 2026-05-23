@@ -34,19 +34,20 @@ export function attachWebSocket(
     }));
 
     ws.on("message", async (raw) => {
-      let msg: any;
+      let msg: Record<string, unknown>;
       try {
-        msg = JSON.parse(raw.toString());
+        msg = JSON.parse(raw.toString()) as Record<string, unknown>;
       } catch {
         ws.send(JSON.stringify({ type: "error", error: "Invalid JSON" }));
         return;
       }
 
-      const { action } = msg;
+      const action = msg.action as string | undefined;
 
       switch (action) {
         case "send": {
-          const { agent, text } = msg;
+          const agent = msg.agent as string | undefined;
+          const text = msg.text as string | undefined;
           if (!agent || !text) {
             ws.send(JSON.stringify({ type: "error", error: "agent and text required" }));
             return;
@@ -62,22 +63,30 @@ export function attachWebSocket(
         }
 
         case "spawn": {
-          const { name, runtime, workspace, model } = msg;
+          const name = msg.name as string | undefined;
+          const runtime = msg.runtime as string | undefined;
+          const workspace = msg.workspace as string | undefined;
+          const model = msg.model as string | undefined;
           const rt = (runtime || "cursor") as RuntimeType;
           const ws_alias = workspace || workspaces[0]?.alias || "cwd";
-          const result = await fleet.spawn(name, rt, ws_alias, model);
+          const result = await fleet.spawn(name as string, rt, ws_alias, model);
           ws.send(JSON.stringify({ type: "spawn_result", message: result }));
           break;
         }
 
         case "kill": {
-          const result = await fleet.kill(msg.agent || msg.name);
+          const result = await fleet.kill((msg.agent || msg.name) as string);
           ws.send(JSON.stringify({ type: "kill_result", message: result }));
           break;
         }
 
         case "history": {
-          const { agent, limit = 50 } = msg;
+          const agent = msg.agent as string | undefined;
+          const limit = (msg.limit as number) || 50;
+          if (!agent) {
+            ws.send(JSON.stringify({ type: "error", error: "agent required" }));
+            return;
+          }
           const agentState = fleet.getAgent(agent);
           if (!agentState) {
             ws.send(JSON.stringify({ type: "error", error: `Agent "${agent}" not found` }));

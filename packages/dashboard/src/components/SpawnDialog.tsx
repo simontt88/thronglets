@@ -6,15 +6,15 @@ import { PixelThronglet } from "./PixelThronglet";
 import { generateThronglet, generateUniqueName } from "../lib/thronglet";
 
 const RUNTIMES = [
-  { id: "cursor",      label: "in-IDE",  desc: "in-IDE edits · refactors · review" },
-  { id: "claude-code", label: "terminal", desc: "terminal · multi-step sweeps · synthesis" },
-  { id: "codex",       label: "agentic", desc: "automation · planning · long-running jobs" },
+  { id: "cursor",      label: "Cursor",      desc: "in-IDE edits · refactors · review" },
+  { id: "claude-code", label: "Claude Code", desc: "terminal · multi-step sweeps · synthesis" },
+  { id: "codex",       label: "Codex",       desc: "automation · planning · long-running jobs" },
 ];
 
 export function SpawnDialog() {
   const { spawnDialogOpen, setSpawnDialogOpen, workspaces, agents } = useFleetStore();
   const [step, setStep] = useState(0);
-  const [name, setName] = useState("");
+  const [name, setName] = useState("preview");
   const [runtime, setRuntime] = useState("cursor");
   const [workspace, setWorkspace] = useState("");
   const [error, setError] = useState("");
@@ -22,15 +22,25 @@ export function SpawnDialog() {
 
   useEffect(() => {
     if (spawnDialogOpen) {
-      const auto = generateUniqueName(agents.map((a) => a.name));
+      try {
+        setName(generateUniqueName(agents.map((a) => a.name)));
+      } catch {
+        setName("Thronglet");
+      }
       setStep(0);
-      setName(auto);
       setRuntime("cursor");
       setWorkspace(workspaces[0]?.alias || "");
       setError("");
       setSpawning(false);
     }
   }, [spawnDialogOpen]);
+
+  const previewSpec = useMemo(() => {
+    try { return generateThronglet(name || "preview"); }
+    catch { return generateThronglet("preview"); }
+  }, [name]);
+
+  if (!spawnDialogOpen) return null;
 
   const close = () => setSpawnDialogOpen(false);
 
@@ -51,7 +61,7 @@ export function SpawnDialog() {
     setError("");
     try {
       await spawnAgent(name.trim(), runtime, workspace || workspaces[0]?.alias || "cwd");
-      close();
+      setSpawnDialogOpen(false);
     } catch (e) {
       setError(String(e));
       setSpawning(false);
@@ -59,7 +69,7 @@ export function SpawnDialog() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") close();
+    if (e.key === "Escape") setSpawnDialogOpen(false);
     if (e.key === "Enter") {
       e.preventDefault();
       if (step === 1) handleSpawn();
@@ -67,19 +77,15 @@ export function SpawnDialog() {
     }
   };
 
-  if (!spawnDialogOpen) return null;
-
-  const previewSpec = useMemo(() => generateThronglet(name || "preview"), [name]);
-
   return (
-    <div className="spawn-overlay" onMouseDown={close}>
+    <div className="spawn-overlay" onMouseDown={() => setSpawnDialogOpen(false)}>
       <div className="spawn-dialog" onMouseDown={(e) => e.stopPropagation()} onKeyDown={handleKeyDown}>
         <div className="spawn-head">
           <div className="spawn-thronglet-preview">
             <PixelThronglet spec={previewSpec} mood="happy" size={48} />
           </div>
           <div className="spawn-title">Hatch a Thronglet</div>
-          <button className="spawn-close" onClick={close}><Icon name="x" size={14} /></button>
+          <button className="spawn-close" onClick={() => setSpawnDialogOpen(false)}><Icon name="x" size={14} /></button>
         </div>
 
         <div className="spawn-steps">

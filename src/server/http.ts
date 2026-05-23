@@ -205,11 +205,11 @@ export function createHttpApp(
   app.delete("/api/workspaces/:alias", (req, res) => {
     const alias = req.params.alias;
     const status = fleet.getStatus();
-    const occupants = status.agents.filter((a: any) => a.workspace === alias);
+    const occupants = status.agents.filter((a) => a.workspace === alias);
     if (occupants.length > 0) {
       res.status(409).json({
-        error: `Cannot delete workspace "${alias}" — ${occupants.length} thronglet(s) still inside: ${occupants.map((a: any) => a.name).join(", ")}. Kill them first.`,
-        agents: occupants.map((a: any) => a.name),
+        error: `Cannot delete workspace "${alias}" — ${occupants.length} thronglet(s) still inside: ${occupants.map((a) => a.name).join(", ")}. Kill them first.`,
+        agents: occupants.map((a) => a.name),
       });
       return;
     }

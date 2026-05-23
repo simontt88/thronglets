@@ -4,8 +4,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(dirname "$SCRIPT_DIR")"
 DASHBOARD="$ROOT/packages/dashboard"
-SLUG="kenyalang-dashboard"
-TITLE="Kenyalang Fleet Dashboard"
+SLUG="thronglets-dashboard"
+TITLE="Thronglets Fleet Dashboard"
 BASE_URL="https://vibespace-five.vercel.app"
 
 # Get API key
@@ -40,7 +40,7 @@ payload = {
     'kind': 'app',
     'title': '$TITLE',
     'html': html,
-    'tags': ['dashboard', 'kenyalang'],
+    'tags': ['dashboard', 'thronglets'],
     'overwrite': True,
 }
 with open('$PAYLOAD_FILE', 'w') as out:
