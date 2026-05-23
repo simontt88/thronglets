@@ -7,11 +7,25 @@ export interface CursorRuntimeConfig {
 
 const PER_STEP_TIMEOUT_MS = 4.5 * 60 * 1000; // 4.5 min per SDK call (before fleet-level timeout)
 
+interface RunResult {
+  id?: string;
+  status?: "finished" | "error" | "cancelled";
+  result?: string;
+  durationMs?: number;
+}
+
+interface SDKRun {
+  wait: () => Promise<RunResult>;
+  stream?: () => AsyncGenerator<unknown, void>;
+  cancel?: () => Promise<void>;
+  readonly status?: string;
+}
+
 class CursorSession implements AgentSession {
-  private agent: { send: (text: string, opts?: Record<string, unknown>) => Promise<{ wait: () => Promise<{ result?: string }> }>; close: () => void };
+  private agent: { send: (text: string, opts?: Record<string, unknown>) => Promise<SDKRun>; close: () => void };
   private alive = true;
 
-  constructor(agent: { send: (text: string, opts?: Record<string, unknown>) => Promise<{ wait: () => Promise<{ result?: string }> }>; close: () => void }) {
+  constructor(agent: { send: (text: string, opts?: Record<string, unknown>) => Promise<SDKRun>; close: () => void }) {
     this.agent = agent;
   }
 
@@ -22,7 +36,6 @@ class CursorSession implements AgentSession {
 
     const run = await this.agent.send(text);
 
-    // Race the wait() against a timeout to prevent infinite hangs
     const result = await Promise.race([
       run.wait(),
       new Promise<never>((_, reject) =>
@@ -30,8 +43,15 @@ class CursorSession implements AgentSession {
       ),
     ]);
 
+    if (result.status === "error") {
+      throw new Error(`Cursor run failed (status=error, id=${result.id ?? "?"})`);
+    }
+    if (result.status === "cancelled") {
+      throw new Error(`Cursor run was cancelled (id=${result.id ?? "?"})`);
+    }
     if (!result.result) {
-      throw new Error("Cursor session returned empty response — connection may be stale");
+      const detail = JSON.stringify({ status: result.status, id: result.id, durationMs: result.durationMs });
+      throw new Error(`Cursor returned empty result: ${detail}`);
     }
     return result.result;
   }
