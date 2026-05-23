@@ -1,12 +1,13 @@
-import { appendFileSync, existsSync, mkdirSync } from "fs";
+import { appendFileSync } from "fs";
 import { join } from "path";
 import { EventEmitter } from "events";
 import type { AgentDef, BridgeConfig, RuntimeType } from "../config.js";
 import type { Runtime, AgentSession } from "../runtimes/interface.js";
 import { loadFleetState, saveFleetState, getSessionsDir, addWorkspace as addWorkspaceToState } from "./state.js";
-import { getToolInstructions } from "./tools.js";
 import { generateUniqueName } from "./naming.js";
-import type { AgentState, AgentStatus, FleetEvent, FleetEventType, FleetState, QueuedMessage, MessageSender } from "./types.js";
+import { buildAgentPreamble, buildDispatcherPreamble } from "./preamble.js";
+import type { AgentState, AgentStatus, FleetEvent, FleetEventType, FleetState, QueuedMessage, MessageSender, WorkspaceEntry } from "./types.js";
+export type { WorkspaceEntry } from "./types.js";
 
 export class FleetEventBus extends EventEmitter {
   publish(type: FleetEventType, agentName: string, sessionId: string, payload?: unknown): void {
@@ -39,11 +40,6 @@ function generatePersonality(name: string): string {
   const trait = TRAITS[h % TRAITS.length];
   const adj = ADJECTIVES[(h >>> 8) % ADJECTIVES.length];
   return `${adj} · ${trait}`;
-}
-
-export interface WorkspaceEntry {
-  alias: string;
-  path: string;
 }
 
 interface LiveAgent {
@@ -438,10 +434,6 @@ export class FleetManager {
       this.logToSession(name, live.sessionId, { type: "agent_message", text: reply!, replyTo: sender });
       this.persistState();
 
-      if (!live.state.sessionName) {
-        this.requestSessionName(name, live);
-      }
-
       // Reply routing: if message was from another agent, route reply back
       if (sender !== "user") {
         this.routeReplyToSender(name, sender, reply!);
@@ -453,7 +445,13 @@ export class FleetManager {
         }
       }
 
-      this.finishProcessing(name, live);
+      // Session naming takes over `processing` to prevent concurrent sends.
+      // If naming fires, it will call finishProcessing when done.
+      if (!live.state.sessionName && live.messageQueue.length === 0) {
+        this.requestSessionName(name, live);
+      } else {
+        this.finishProcessing(name, live);
+      }
       return reply!;
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
@@ -534,81 +532,28 @@ export class FleetManager {
   }
 
   buildPreamble(name: string): string {
-    const isDispatcher = name === "_dispatcher";
     const live = this.agents.get(name);
     if (!live) return "";
     const sessionsDir = getSessionsDir(name);
 
-    if (isDispatcher) {
-      return this.buildDispatcherPreamble(live, sessionsDir);
+    if (name === "_dispatcher") {
+      return buildDispatcherPreamble(this.getStatus(), this.config.workspaces, sessionsDir);
     }
 
-    const titleStr = live.state.title ? ` — ${live.state.title}` : "";
-    const personality = live.state.personality || "curious";
-    return [
-      `[SYSTEM] Your name is "${name}"${titleStr}. You ARE ${name}. Never refer to yourself in third person — you are the one doing the work, not delegating to yourself.`,
-      `Personality: ${personality}.`,
-      `You are a thronglet (coding agent) in the Thronglets fleet. Your session logs: ${sessionsDir}`,
-      `Messages from other agents are prefixed [from:name]. Messages from the dispatcher are [from:_dispatcher]. Messages from the human master have no prefix.`,
-      "",
-      getToolInstructions(false),
-    ].join("\n");
-  }
-
-  private buildDispatcherPreamble(live: LiveAgent, sessionsDir: string): string {
-    const status = this.getStatus();
-    const agentSummary = status.agents
-      .filter((a) => a.name !== "_dispatcher")
-      .map((a) => {
-        const titlePart = a.title ? ` (${a.title})` : "";
-        const parts = [`@${a.name}${titlePart}: ${a.runtime} · ws:${a.workspace} · ${a.status}`];
-        if (a.sessionName) parts.push(`「${a.sessionName}」`);
-        if (a.inferred && a.status === "working") parts.push(`(${a.inferred})`);
-        return `  - ${parts.join(" ")}`;
-      })
-      .join("\n");
-
-    const wsSummary = this.config.workspaces
-      .map((w) => `  - ${w.alias}: ${w.path}`)
-      .join("\n");
-
-    return [
-      `[SYSTEM] You are the Thronglets Fleet Dispatcher (Orix).`,
-      `Your session logs: ${sessionsDir}`,
-      ``,
-      `## Your role`,
-      `You manage a fleet of thronglets (coding agents). Each runs in a specific workspace with a specific runtime.`,
-      `When the user sends a message:`,
-      `1. Analyze what they need`,
-      `2. Route to the best thronglet(s) by workspace match, then runtime strength`,
-      `3. Forward using fleet tools below`,
-      `4. Report back briefly`,
-      ``,
-      `## Routing intelligence`,
-      `- **cursor**: in-IDE edits, refactors, code review, TypeScript/React`,
-      `- **claude-code**: terminal tasks, multi-step sweeps, shell scripts, complex analysis`,
-      `- **codex**: automation, planning, long-running background jobs`,
-      `- Match by workspace first, then runtime. Split large tasks across thronglets.`,
-      `- Never do coding work yourself — always delegate.`,
-      `- If no thronglets available, suggest spawning one.`,
-      ``,
-      getToolInstructions(true),
-      ``,
-      `## Current fleet`,
-      `${status.total - 1} thronglets (${status.working} working, ${status.waiting} waiting, ${status.sleeping} sleeping, ${status.dead} dead)`,
-      agentSummary || "  (no thronglets spawned — suggest spawning one)",
-      ``,
-      `## Workspaces`,
-      wsSummary || "  (none configured)",
-    ].join("\n");
+    return buildAgentPreamble(name, live.state, sessionsDir);
   }
 
   private requestSessionName(name: string, live: LiveAgent): void {
     if (!live.session) return;
+    // Skip naming if messages are queued — avoid concurrent sends on the session
+    if (live.messageQueue.length > 0) return;
+
     const prompt = live.state.sessionName
       ? `当前session名是"${live.state.sessionName}"。如果话题已变，用不超过10个字重新命名；否则回复同样的名字。只回复名字本身。`
       : "这个session还没有名字。用不超过10个字给它起个名字，概括我们在做什么。只回复名字本身，不要引号或其他内容。";
 
+    // Mark processing to prevent dequeued messages from racing with this send
+    live.processing = true;
     live.session.send(prompt).then((nameReply) => {
       const raw = nameReply.trim().replace(/^["'""'']+|["'""'']+$/g, "").trim();
       const sessionName = raw.slice(0, 20);
@@ -621,6 +566,8 @@ export class FleetManager {
       }
     }).catch((err) => {
       console.warn(`[fleet] ${name}: session naming failed: ${(err as Error).message?.slice(0, 60)}`);
+    }).finally(() => {
+      this.finishProcessing(name, live);
     });
   }
 

@@ -5,7 +5,8 @@ export interface CursorRuntimeConfig {
   model: string;
 }
 
-const PER_STEP_TIMEOUT_MS = 4.5 * 60 * 1000; // 4.5 min per SDK call (before fleet-level timeout)
+const SEND_CALL_TIMEOUT_MS = 60 * 1000; // 60s for the SDK send() call itself
+const WAIT_TIMEOUT_MS = 4.5 * 60 * 1000; // 4.5 min for run.wait() to resolve
 
 interface RunResult {
   id?: string;
@@ -24,6 +25,7 @@ interface SDKRun {
 class CursorSession implements AgentSession {
   private agent: { send: (text: string, opts?: Record<string, unknown>) => Promise<SDKRun>; close: () => void };
   private alive = true;
+  private busy = false;
 
   constructor(agent: { send: (text: string, opts?: Record<string, unknown>) => Promise<SDKRun>; close: () => void }) {
     this.agent = agent;
@@ -33,33 +35,58 @@ class CursorSession implements AgentSession {
     if (!this.alive) {
       throw new Error("Session closed — create a new one");
     }
+    if (this.busy) {
+      throw new Error("Session busy — concurrent send() calls are not supported");
+    }
 
+    this.busy = true;
+    try {
+      return await this.doSend(text);
+    } finally {
+      this.busy = false;
+    }
+  }
+
+  private async doSend(text: string): Promise<string> {
     let run: SDKRun;
     try {
-      run = await this.agent.send(text);
+      run = await Promise.race([
+        this.agent.send(text),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Cursor SDK send() hung — no run object within timeout")), SEND_CALL_TIMEOUT_MS)
+        ),
+      ]);
     } catch (sendErr) {
       this.alive = false;
-      throw new Error(`Cursor SDK send() failed (session likely stale): ${sendErr instanceof Error ? sendErr.message : sendErr}`);
+      throw new Error(`Cursor SDK send() failed: ${sendErr instanceof Error ? sendErr.message : sendErr}`);
     }
 
-    const result = await Promise.race([
-      run.wait(),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error("Cursor SDK wait() hung — no response within timeout")), PER_STEP_TIMEOUT_MS)
-      ),
-    ]);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const result = await Promise.race([
+        run.wait(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            run.cancel?.().catch(() => {});
+            reject(new Error("Cursor SDK wait() hung — no response within timeout"));
+          }, WAIT_TIMEOUT_MS);
+        }),
+      ]);
 
-    if (result.status === "error") {
-      throw new Error(`Cursor run failed (status=error, id=${result.id ?? "?"})`);
+      if (result.status === "error") {
+        throw new Error(`Cursor run failed (status=error, id=${result.id ?? "?"})`);
+      }
+      if (result.status === "cancelled") {
+        throw new Error(`Cursor run was cancelled (id=${result.id ?? "?"})`);
+      }
+      if (!result.result) {
+        const detail = JSON.stringify({ status: result.status, id: result.id, durationMs: result.durationMs });
+        throw new Error(`Cursor returned empty result: ${detail}`);
+      }
+      return result.result;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
     }
-    if (result.status === "cancelled") {
-      throw new Error(`Cursor run was cancelled (id=${result.id ?? "?"})`);
-    }
-    if (!result.result) {
-      const detail = JSON.stringify({ status: result.status, id: result.id, durationMs: result.durationMs });
-      throw new Error(`Cursor returned empty result: ${detail}`);
-    }
-    return result.result;
   }
 
   close(): void {
