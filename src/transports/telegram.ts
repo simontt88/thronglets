@@ -1,11 +1,13 @@
 import TelegramBot from "node-telegram-bot-api";
-import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 import type { Transport, IncomingMessage, TransportOptions } from "./interface.js";
+import { renderAvatarPNG } from "../fleet/render-avatar.js";
 
-const KENYALANG_HOME = process.env.KENYALANG_HOME || join(homedir(), ".kenyalang");
-const PID_FILE = join(KENYALANG_HOME, "bridge.pid");
+const THRONGLETS_HOME = process.env.THRONGLETS_HOME || join(homedir(), ".thronglets");
+const PID_FILE = join(THRONGLETS_HOME, "bridge.pid");
+const AVATAR_FLAG = join(THRONGLETS_HOME, "bot-avatar-set");
 
 export interface TelegramConfig {
   token: string;
@@ -90,16 +92,60 @@ export class TelegramTransport implements Transport {
     // Register slash commands for autocomplete menu
     this.bot.setMyCommands([
       { command: "start", description: "Welcome & setup info" },
-      { command: "new", description: "Spawn: /new <name> <runtime> <workspace>" },
-      { command: "kill", description: "Remove: /kill <name>" },
-      { command: "change", description: "Switch: /change <name> model|workspace|runtime <val>" },
-      { command: "fleet", description: "List all agents + status" },
+      { command: "new", description: "Hatch a thronglet (auto-named)" },
+      { command: "kill", description: "Release: /kill <name>" },
+      { command: "change", description: "Reconfigure: /change <name> model|workspace|runtime <val>" },
+      { command: "fleet", description: "List all thronglets + status" },
       { command: "clear", description: "Reset session: /clear <name>" },
       { command: "status", description: "Detail: /status <name>" },
       { command: "help", description: "Show all commands" },
     ]).catch(() => {});
 
+    // Set bot profile photo (once, on first startup)
+    this.setInitialAvatar().catch((err) => {
+      console.warn(`[telegram] avatar set failed: ${(err as Error).message?.slice(0, 80)}`);
+    });
+
     console.log(`[telegram] transport started`);
+  }
+
+  private async setInitialAvatar(): Promise<void> {
+    if (existsSync(AVATAR_FLAG)) return;
+    if (!this.bot) return;
+
+    const seed = `thronglet-bot-${Date.now()}`;
+    const png = renderAvatarPNG(seed);
+    const tmpPath = join(THRONGLETS_HOME, "bot-avatar.png");
+    mkdirSync(THRONGLETS_HOME, { recursive: true });
+    writeFileSync(tmpPath, png);
+
+    try {
+      // Telegram Bot API: setMyProfilePhoto requires multipart upload
+      const FormData = (await import("node:buffer")).Buffer;
+      const url = `https://api.telegram.org/bot${this.config.token}/setMyProfilePhoto`;
+      const boundary = "----ThrongletsAvatarBoundary";
+      const body = Buffer.concat([
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="photo"; filename="avatar.png"\r\nContent-Type: image/png\r\n\r\n`),
+        png,
+        Buffer.from(`\r\n--${boundary}--\r\n`),
+      ]);
+
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": `multipart/form-data; boundary=${boundary}` },
+        body,
+      });
+
+      if (res.ok) {
+        writeFileSync(AVATAR_FLAG, seed);
+        console.log("[telegram] bot avatar set successfully");
+      } else {
+        const text = await res.text();
+        console.warn(`[telegram] avatar API returned ${res.status}: ${text.slice(0, 120)}`);
+      }
+    } catch (err) {
+      console.warn(`[telegram] avatar upload error: ${(err as Error).message?.slice(0, 80)}`);
+    }
   }
 
   async stop(): Promise<void> {

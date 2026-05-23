@@ -1,10 +1,10 @@
 {
-  "name": "kenyalang",
-  "version": "0.6.0",
-  "description": "Multi-agent fleet orchestrator — bridge workspace capabilities to Telegram/Lark/Discord with Cursor, Claude Code, and Codex",
+  "name": "thronglets",
+  "version": "0.7.0",
+  "description": "Thronglets — multi-agent fleet orchestrator for Telegram/Lark/Discord with Cursor, Claude Code, and Codex",
   "type": "module",
   "bin": {
-    "kenyalang": "./bin/kenyalang.js"
+    "thronglets": "./bin/kenyalang.js"
   },
   "scripts": {
     "start": "node --import tsx src/index.ts",

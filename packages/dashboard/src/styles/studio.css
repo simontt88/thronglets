@@ -182,6 +182,12 @@ body.theme-dark .aurora::before {
 .tb-btn:hover { color: var(--t-1); background: rgba(245,166,35,0.06); }
 .tb-btn.primary { background: linear-gradient(135deg, #f5a623, #e88d3a); color: #ffffff; font-weight: 700; box-shadow: 0 2px 4px rgba(245,130,30,0.25); }
 .tb-btn.primary:hover { filter: brightness(1.1); transform: translateY(-1px); }
+.tb-btn.danger { color: var(--st-error, #e74c3c); }
+.tb-btn.danger:hover { background: rgba(231,76,60,0.12); }
+
+.ws-add-form { display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--bg-2); border-top: 1px solid var(--border-1); }
+.ws-add-input { height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--border-1); background: var(--bg-1); color: var(--t-1); font-size: 12px; font-family: var(--font-mono); flex: 1; min-width: 120px; }
+.ws-add-input:focus { border-color: var(--accent, #f5a623); outline: none; }
 .tb-cols { display: inline-flex; align-items: center; font-family: var(--font-mono); font-size: 10.5px; color: var(--t-2); padding: 0 6px; }
 .tb-cols .num { color: var(--t-1); font-weight: 800; margin: 0 4px; }
 

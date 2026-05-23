@@ -66,7 +66,7 @@ export interface BridgeConfig {
   dispatcher?: DispatcherDef;
 }
 
-const GLOBAL_CONFIG_DIR = process.env.KENYALANG_HOME || join(homedir(), ".kenyalang");
+const GLOBAL_CONFIG_DIR = process.env.THRONGLETS_HOME || join(homedir(), ".thronglets");
 const GLOBAL_CONFIG_PATH = join(GLOBAL_CONFIG_DIR, "config.yaml");
 
 function resolveEnvVars(value: string): string {
@@ -235,7 +235,7 @@ export function loadConfig(): BridgeConfig {
           : join(workspace, config.session.storeDir)
     );
   } else {
-    config.session.storeDir = join(workspace, ".kenyalang");
+    config.session.storeDir = join(workspace, ".thronglets");
   }
 
   return config;

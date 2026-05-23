@@ -5,10 +5,10 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { FleetState } from "./types.js";
 import type { WorkspaceEntry } from "./manager.js";
 
-const KENYALANG_HOME = process.env.KENYALANG_HOME || join(homedir(), ".kenyalang");
-const FLEET_DIR = join(KENYALANG_HOME, "fleet");
+const THRONGLETS_HOME = process.env.THRONGLETS_HOME || join(homedir(), ".thronglets");
+const FLEET_DIR = join(THRONGLETS_HOME, "fleet");
 const STATE_FILE = join(FLEET_DIR, "fleet-state.json");
-const WORKSPACES_FILE = join(KENYALANG_HOME, "workspaces.yaml");
+const WORKSPACES_FILE = join(THRONGLETS_HOME, "workspaces.yaml");
 
 function ensureDir(dir: string): void {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });

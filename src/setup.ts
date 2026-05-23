@@ -3,7 +3,7 @@ import { join } from "path";
 import { homedir } from "os";
 import { createInterface } from "readline";
 
-const CONFIG_DIR = join(homedir(), ".kenyalang");
+const CONFIG_DIR = join(homedir(), ".thronglets");
 const CONFIG_PATH = join(CONFIG_DIR, "config.yaml");
 
 function prompt(question: string): Promise<string> {
@@ -17,7 +17,7 @@ function prompt(question: string): Promise<string> {
 }
 
 export async function runSetup() {
-  console.log("Kenyalang Setup\n");
+  console.log("Thronglets Setup\n");
 
   if (existsSync(CONFIG_PATH)) {
     console.log(`Existing config found at ${CONFIG_PATH}`);
@@ -86,7 +86,7 @@ export async function runSetup() {
   }
 
   lines.push("session:");
-  lines.push(`  log_dir: ~/.kenyalang/logs`);
+  lines.push(`  log_dir: ~/.thronglets/logs`);
   if (recallApi) {
     lines.push(`  recall_api: ${recallApi}`);
     if (recallKey) {
@@ -100,7 +100,7 @@ export async function runSetup() {
   writeFileSync(CONFIG_PATH, yaml);
 
   console.log(`\nConfig written to ${CONFIG_PATH}`);
-  console.log("\nTo start the bridge:");
+  console.log("\nTo start:");
   console.log("  cd /path/to/your/workspace");
-  console.log("  kenyalang start");
+  console.log("  thronglets start");
 }

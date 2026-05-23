@@ -1,8 +1,12 @@
-import { useFleetStore } from "../stores/fleet";
+import { useState } from "react";
+import { useFleetStore, addWorkspace, deleteWorkspace } from "../stores/fleet";
 import { Icon } from "./Icons";
 
 export function WorkspaceHeader() {
-  const { agents, workspaces, currentWorkspace, cols, setCols, toggleDispatcher, dispatcherOpen, setSpawnDialogOpen } = useFleetStore();
+  const { agents, workspaces, currentWorkspace, cols, setCols, setSpawnDialogOpen, setWorkspace } = useFleetStore();
+  const [showAddWs, setShowAddWs] = useState(false);
+  const [wsAlias, setWsAlias] = useState("");
+  const [wsPath, setWsPath] = useState("");
 
   const filtered = currentWorkspace === "all" ? agents : agents.filter((a) => a.workspace === currentWorkspace);
   const working = filtered.filter((a) => a.status === "working").length;
@@ -12,7 +16,22 @@ export function WorkspaceHeader() {
 
   const title = currentWorkspace === "all" ? "All Thronglets" : currentWorkspace;
   const wsEntry = workspaces.find((w) => w.alias === currentWorkspace);
-  const wsPath = wsEntry?.path || (currentWorkspace === "all" ? "" : "");
+  const wsPath_ = wsEntry?.path || "";
+
+  const handleAddWs = async () => {
+    if (!wsAlias.trim() || !wsPath.trim()) return;
+    await addWorkspace(wsAlias.trim(), wsPath.trim());
+    setWsAlias("");
+    setWsPath("");
+    setShowAddWs(false);
+  };
+
+  const handleDeleteWs = async () => {
+    if (currentWorkspace === "all") return;
+    if (!confirm(`Remove workspace "${currentWorkspace}"?`)) return;
+    await deleteWorkspace(currentWorkspace);
+    setWorkspace("all");
+  };
 
   return (
     <div className="ws-header">
@@ -26,14 +45,14 @@ export function WorkspaceHeader() {
           {title}
           <span className="h-sub">{filtered.length} thronglet{filtered.length !== 1 ? "s" : ""}</span>
         </div>
-        {wsPath && <div className="h-path">{wsPath}</div>}
+        {wsPath_ && <div className="h-path">{wsPath_}</div>}
       </div>
       <div className="h-stats">
         <span><span className="v">{filtered.length}</span>total</span>
         <span><span className="v">{working}</span>grinding</span>
         <span><span className="v">{errors}</span>sad</span>
         <span><span className="v">{idle}</span>vibing</span>
-        {dead > 0 && <span><span className="v">{dead}</span>dead 💀</span>}
+        {dead > 0 && <span><span className="v">{dead}</span>dead</span>}
       </div>
       <div className="stage-toolbar">
         <div className="tb-group">
@@ -48,12 +67,39 @@ export function WorkspaceHeader() {
           </button>
         </div>
         <div className="tb-group">
-          <button className={"tb-btn" + (dispatcherOpen ? " primary" : "")} onClick={toggleDispatcher}>
-            <Icon name="dispatch" size={12} />
-            <span>Habitat</span>
+          <button className="tb-btn" onClick={() => setShowAddWs(true)}>
+            <Icon name="plus" size={12} />
+            <span>Workspace</span>
           </button>
+          {currentWorkspace !== "all" && (
+            <button className="tb-btn danger" onClick={handleDeleteWs} title={`Remove workspace "${currentWorkspace}"`}>
+              <Icon name="x" size={12} />
+            </button>
+          )}
         </div>
       </div>
+
+      {showAddWs && (
+        <div className="ws-add-form">
+          <input
+            className="ws-add-input"
+            placeholder="alias (e.g. my-project)"
+            value={wsAlias}
+            onChange={(e) => setWsAlias(e.target.value)}
+            autoFocus
+            onKeyDown={(e) => e.key === "Enter" && handleAddWs()}
+          />
+          <input
+            className="ws-add-input"
+            placeholder="/path/to/workspace"
+            value={wsPath}
+            onChange={(e) => setWsPath(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleAddWs()}
+          />
+          <button className="tb-btn primary" onClick={handleAddWs}>Add</button>
+          <button className="tb-btn" onClick={() => setShowAddWs(false)}>Cancel</button>
+        </div>
+      )}
     </div>
   );
 }

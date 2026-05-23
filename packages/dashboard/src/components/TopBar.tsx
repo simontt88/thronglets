@@ -22,7 +22,7 @@ export function TopBar() {
         <div className="brand-mark">
           <PixelThronglet spec={generateThronglet("thronglets")} mood="happy" size={28} />
         </div>
-        <div className="brand-name">Thronglets<span className="dim">fleet</span></div>
+        <div className="brand-name">Thronglets</div>
       </div>
 
       <nav className="workspaces">
@@ -51,7 +51,7 @@ export function TopBar() {
         </button>
         <button
           className={"icon-btn" + (dispatcherOpen ? " on" : "")}
-          title="Toggle habitat"
+          title="Toggle status panel"
           onClick={toggleDispatcher}
         >
           <Icon name="panel" size={14} />

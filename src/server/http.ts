@@ -5,7 +5,7 @@ import type { FleetManager } from "../fleet/index.js";
 import type { BridgeConfig, RuntimeType } from "../config.js";
 import type { WorkspaceEntry } from "../fleet/index.js";
 import { readdirSync, readFileSync, existsSync } from "fs";
-import { getSessionsDir } from "../fleet/state.js";
+import { getSessionsDir, addWorkspace, removeWorkspace, loadWorkspaces } from "../fleet/state.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, "../../package.json"), "utf-8"));
@@ -143,13 +143,9 @@ export function createHttpApp(
 
   app.post("/api/fleet/spawn", async (req, res) => {
     const { name, runtime, workspace, model } = req.body;
-    if (!name) {
-      res.status(400).json({ error: "name is required" });
-      return;
-    }
     const rt = (runtime || config.agents[0]?.runtime || "cursor") as RuntimeType;
     const ws = workspace || workspaces[0]?.alias || "cwd";
-    const result = await fleet.spawn(name, rt, ws, model);
+    const result = await fleet.spawn(name || undefined, rt, ws, model);
     const success = !result.includes("already exists") && !result.includes("Unknown");
     res.status(success ? 201 : 400).json({ message: result, success });
   });
@@ -191,6 +187,27 @@ export function createHttpApp(
     }
     const result = await fleet.change(name, field, value, config, workspaces);
     res.json({ message: result });
+  });
+
+  app.post("/api/workspaces", (req, res) => {
+    const { alias, path } = req.body;
+    if (!alias || !path) {
+      res.status(400).json({ error: "alias and path are required" });
+      return;
+    }
+    const result = addWorkspace(alias, path);
+    const updated = loadWorkspaces();
+    workspaces.length = 0;
+    workspaces.push(...updated);
+    res.json({ message: result, workspaces: updated });
+  });
+
+  app.delete("/api/workspaces/:alias", (req, res) => {
+    const result = removeWorkspace(req.params.alias);
+    const updated = loadWorkspaces();
+    workspaces.length = 0;
+    workspaces.push(...updated);
+    res.json({ message: result, workspaces: updated });
   });
 
   return app;

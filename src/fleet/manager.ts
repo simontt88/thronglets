@@ -6,6 +6,7 @@ import type { AgentSession } from "../runtimes/interface.js";
 import { FleetEventBus } from "./event-bus.js";
 import { loadFleetState, saveFleetState, getSessionsDir, addWorkspace as addWorkspaceToState } from "./state.js";
 import { getToolInstructions } from "./tool-instructions.js";
+import { generateUniqueName } from "./naming.js";
 import type { AgentState, AgentStatus, FleetState, QueuedMessage, MessageSender } from "./types.js";
 
 export interface WorkspaceEntry {
@@ -127,9 +128,14 @@ export class FleetManager {
     saveFleetState(state);
   }
 
-  async spawn(name: string, runtime: RuntimeType, workspaceAlias: string, model?: string): Promise<string> {
+  autoName(): string {
+    return generateUniqueName(this.listAgents());
+  }
+
+  async spawn(name: string | undefined, runtime: RuntimeType, workspaceAlias: string, model?: string): Promise<string> {
+    if (!name) name = this.autoName();
     if (this.agents.has(name)) {
-      return `Agent "${name}" already exists. Use /kill first.`;
+      return `"${name}" already exists. Use /kill first.`;
     }
 
     const workspacePath = this.resolveWorkspace(workspaceAlias);

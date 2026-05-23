@@ -104,13 +104,17 @@ async function ensureRulesSync(agentDef: AgentDef, workspace: string) {
 }
 
 function loadWorkspaces(): WorkspaceEntry[] {
-  const kenyalangHome = process.env.KENYALANG_HOME || join(homedir(), ".kenyalang");
-  const wsFile = join(kenyalangHome, "workspaces.yaml");
+  const throngletsHome = process.env.THRONGLETS_HOME || join(homedir(), ".thronglets");
+  const wsFile = join(throngletsHome, "workspaces.yaml");
   if (!existsSync(wsFile)) return [];
   try {
     const raw = parseYaml(readFileSync(wsFile, "utf-8"));
     if (!raw?.workspaces) return [];
-    return Object.entries(raw.workspaces).map(([alias, val]: [string, any]) => ({
+    const ws = raw.workspaces;
+    if (Array.isArray(ws)) {
+      return ws.map((w: any) => ({ alias: w.alias, path: w.path }));
+    }
+    return Object.entries(ws).map(([alias, val]: [string, any]) => ({
       alias,
       path: val.path || val,
     }));
@@ -213,30 +217,30 @@ async function main() {
             ? `\nActive agents: ${currentFleet.join(", ")}\nSend messages directly or use @name prefix.`
             : "\nNo agents running yet. Spawn one to get started:";
           const welcome = [
-            `\u{1F916} Kenyalang v${VERSION}`,
+            `🐣 Thronglets v${VERSION}`,
             "",
-            "Multi-agent fleet orchestrator — each agent runs in a workspace with full file/shell/git access.",
+            "Your thronglet fleet — each creature runs in a workspace with full coding powers.",
             "",
-            "\u{1F680} Quick Start:",
-            "  /new kevin cursor vs",
-            "  Then just type a message \u2014 it goes to your agent.",
+            "🚀 Quick Start:",
+            "  /new — hatch a thronglet (auto-named)",
+            "  Then just type a message — it goes to your thronglet.",
             "",
-            "\u{1F4CB} Commands:",
-            "  /new <name> <runtime> <workspace> \u2014 spawn agent",
-            "  /kill <name> \u2014 stop & remove agent",
-            "  /change <name> <model|workspace|runtime> <value> \u2014 switch config",
-            "  /clear <name> \u2014 reset session (keep agent)",
-            "  /fleet \u2014 list all agents + status",
-            "  /status <name> \u2014 agent detail",
+            "📋 Commands:",
+            "  /new [name] [runtime] [workspace] — hatch a thronglet",
+            "  /kill <name> — release a thronglet",
+            "  /change <name> <model|workspace|runtime> <value> — reconfigure",
+            "  /clear <name> — fresh session (keep thronglet)",
+            "  /fleet — list all thronglets + status",
+            "  /status <name> — thronglet detail",
             "",
-            "\u{1F4AC} Messaging:",
-            "  Just type \u2014 goes to your only agent",
-            "  @name msg \u2014 route to specific agent",
-            "  @all msg \u2014 broadcast to all",
+            "💬 Messaging:",
+            "  Just type — goes to your only thronglet",
+            "  @name msg — route to a specific one",
+            "  @all msg — broadcast to all",
             "",
-            `\u{2699}\uFE0F Runtimes:\n${runtimes}`,
+            `⚙️ Runtimes:\n${runtimes}`,
             "",
-            `\u{1F4C1} Workspaces:\n${wsList}`,
+            `📁 Workspaces:\n${wsList}`,
             fleetLine,
           ].join("\n");
           await transport.sendReply(chatId, welcome);
@@ -249,13 +253,9 @@ async function main() {
             sendNewPrompt(transport.getBot()!, chatId);
             return;
           }
-          if (!name) {
-            await transport.sendReply(chatId, "Usage: /new <name> [runtime] [workspace]\n\nRuntimes: cursor, claude-code, codex\nWorkspaces: " + workspaces.map((w) => w.alias).join(", "));
-            return;
-          }
           const rt = (runtime || config.agents[0]?.runtime || "cursor") as RuntimeType;
           const ws = workspace || cwdAlias?.alias || workspaces[0]?.alias || "cwd";
-          const result = await fleet.spawn(name, rt, ws);
+          const result = await fleet.spawn(name || undefined, rt, ws);
           await transport.sendReply(chatId, result);
           return;
         }
@@ -297,7 +297,7 @@ async function main() {
             return;
           }
           if (!name || !field || !value) {
-            await transport.sendReply(chatId, "Usage: /change <name> <model|workspace|runtime> <value>\n\nExamples:\n  /change kevin model claude-sonnet-4-6\n  /change kevin workspace vb\n  /change kevin runtime claude-code");
+            await transport.sendReply(chatId, "Usage: /change <name> <model|workspace|runtime> <value>\n\nExamples:\n  /change Noxmi model claude-sonnet-4-6\n  /change Noxmi workspace vb\n  /change Noxmi runtime claude-code");
             return;
           }
           const changeResult = await fleet.change(name, field, value, config, workspaces);
@@ -308,7 +308,7 @@ async function main() {
         case "/fleet": {
           const status = fleet.getStatus();
           if (status.total === 0) {
-            await transport.sendReply(chatId, "No agents running.\nSpawn one: /new <name> <runtime> <workspace>");
+            await transport.sendReply(chatId, "No thronglets running.\nHatch one: /new [runtime] [workspace]");
             return;
           }
           const lines = status.agents
@@ -324,7 +324,7 @@ async function main() {
               return `${dot} **${a.name}**  ${activity}`;
             });
           const deadInfo = status.dead ? `, ${status.dead} dead` : "";
-          const header = `\u{1F916} Fleet: ${status.total - 1} agents (${status.working} working, ${status.idle} idle${deadInfo})`;
+          const header = `🐣 Fleet: ${status.total - 1} thronglets (${status.working} working, ${status.idle} idle${deadInfo})`;
           await transport.sendReply(chatId, `${header}\n\n${lines.join("\n")}`);
           return;
         }
@@ -357,16 +357,16 @@ async function main() {
 
         case "/help":
           await transport.sendReply(chatId, [
-            "Fleet Commands:",
-            "  /new <name> [runtime] [workspace] \u2014 spawn agent",
-            "  /kill <name> \u2014 remove agent",
-            "  /clear <name> \u2014 archive session, fresh start",
-            "  /fleet \u2014 show all agents",
-            "  /status [name] \u2014 agent detail",
+            "Thronglets Commands:",
+            "  /new [name] [runtime] [workspace] — hatch a thronglet",
+            "  /kill <name> — release a thronglet",
+            "  /clear <name> — archive session, fresh start",
+            "  /fleet — show all thronglets",
+            "  /status [name] — thronglet detail",
             "",
             "Messaging:",
-            "  @name message \u2014 send to specific agent",
-            "  @all message \u2014 broadcast to all agents",
+            "  @name message — send to specific thronglet",
+            "  @all message — broadcast to all",
             "",
             `Runtimes: ${config.agents.map((a) => a.runtime).join(", ")}`,
             `Workspaces: ${workspaces.map((w) => w.alias).join(", ")}`,
@@ -434,7 +434,7 @@ async function main() {
         clearInterval(typingInterval);
       }
     } else if (agentList.length === 0 && !fleet.hasAgent(DISPATCHER_AGENT_NAME)) {
-      await transport.sendReply(chatId, "No agents running.\n\nSpawn one: /new <name> [runtime] [workspace]\nExample: /new alpha cursor vs");
+      await transport.sendReply(chatId, "No thronglets running.\n\nHatch one: /new [runtime] [workspace]");
     } else if (dispatcherConfig.enabled && fleet.hasAgent(DISPATCHER_AGENT_NAME)) {
       // Dispatcher enabled — route unmentioned messages to dispatcher
       await transport.sendTyping(chatId);
@@ -466,12 +466,12 @@ async function main() {
     }
   }
 
-  console.log(`\nKenyalang v${VERSION} (Fleet Mode)`);
+  console.log(`\nThronglets v${VERSION}`);
   console.log(`  Transport:   ${transport.name}`);
   console.log(`  API:         http://127.0.0.1:${port}`);
   console.log(`  WebSocket:   ws://127.0.0.1:${port}/ws`);
   console.log(`  Workspaces:  ${workspaces.map((w) => `${w.alias}→${w.path.split("/").pop()}`).join(", ")}`);
-  console.log(`  Agents def:  ${config.agents.map((a) => `${a.name}(${a.runtime})`).join(", ")}`);
+  console.log(`  Runtimes:    ${config.agents.map((a) => `${a.name}(${a.runtime})`).join(", ")}`);
   console.log(`  Fleet:       ${fleet.listAgents().length} restored`);
   console.log(`\n  Commands: /new /kill /fleet /clear /change /status /help`);
   console.log(`  Mention:  @name message | @all message\n`);

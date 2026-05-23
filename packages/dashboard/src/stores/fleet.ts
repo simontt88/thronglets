@@ -376,6 +376,36 @@ export async function changeAgent(name: string, field: string, value: string) {
   } catch {}
 }
 
+export async function addWorkspace(alias: string, path: string) {
+  try {
+    const res = await fetch(`${serverBase.http}/api/workspaces`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ alias, path }),
+    });
+    const data = await res.json();
+    if (data.workspaces) {
+      useFleetStore.setState({ workspaces: data.workspaces });
+    }
+    return data.message as string;
+  } catch (e) {
+    return String(e);
+  }
+}
+
+export async function deleteWorkspace(alias: string) {
+  try {
+    const res = await fetch(`${serverBase.http}/api/workspaces/${encodeURIComponent(alias)}`, { method: "DELETE" });
+    const data = await res.json();
+    if (data.workspaces) {
+      useFleetStore.setState({ workspaces: data.workspaces });
+    }
+    return data.message as string;
+  } catch (e) {
+    return String(e);
+  }
+}
+
 export function getAgentAccent(agent: AgentState): string {
   const store = useFleetStore.getState();
   const overrides = store.colorOverrides;

@@ -61,41 +61,7 @@ export function setupInlineButtons(
     await bot.answerCallbackQuery(query.id).catch(() => {});
   });
 
-  // Handle text input for pending flows (e.g., agent name)
-  bot.on("message", async (msg) => {
-    if (!msg.text || msg.text.startsWith("/")) return;
-    const chatId = String(msg.chat.id);
-    const flow = pendingFlows.get(chatId);
-    if (!flow) return;
-
-    cleanExpired();
-    if (!pendingFlows.has(chatId)) return;
-
-    if (flow.action === "new" && flow.step === 1) {
-      const name = msg.text.trim().split(/\s+/)[0].toLowerCase();
-      if (!name || name.length > 20) {
-        await bot.sendMessage(Number(chatId), "Name must be 1-20 characters. Try again:");
-        return;
-      }
-      if (fleet.hasAgent(name)) {
-        await bot.sendMessage(Number(chatId), `"${name}" already exists. Pick another name:`);
-        return;
-      }
-      flow.data.name = name;
-      flow.step = 2;
-
-      const runtimeButtons: Array<Array<{text: string; callback_data: string}>> = config.agents.map((a) => [{
-        text: a.runtime,
-        callback_data: `new:workspace:${name}:${a.runtime}`,
-      }]);
-      runtimeButtons.push([{ text: "Cancel", callback_data: "cancel:x" }]);
-
-      const sent = await bot.sendMessage(Number(chatId), `⚙️ Pick runtime for "${name}":`, {
-        reply_markup: { inline_keyboard: runtimeButtons },
-      });
-      flow.messageId = sent.message_id;
-    }
-  });
+  // No text input needed — names are auto-generated
 }
 
 async function handleNewFlow(
@@ -110,22 +76,32 @@ async function handleNewFlow(
 ): Promise<void> {
   switch (step) {
     case "start": {
-      pendingFlows.set(chatId, {
-        action: "new",
-        step: 1,
-        data: {},
-        messageId: msgId,
-        expiresAt: Date.now() + FLOW_TIMEOUT_MS,
-      });
-      await bot.editMessageText("📝 Type a name for your agent:", {
+      const autoName = fleet.autoName();
+      const runtimeButtons: Array<Array<{text: string; callback_data: string}>> = config.agents.map((a) => [{
+        text: a.runtime,
+        callback_data: `new:workspace:${autoName}:${a.runtime}`,
+      }]);
+      runtimeButtons.push([{ text: "Cancel", callback_data: "cancel:x" }]);
+
+      await bot.editMessageText(`🐣 Hatching "${autoName}" — pick runtime:`, {
         chat_id: Number(chatId),
         message_id: msgId,
+        reply_markup: { inline_keyboard: runtimeButtons },
       });
       break;
     }
 
     case "workspace": {
       const [name, runtime] = params;
+      if (workspaces.length === 1) {
+        pendingFlows.delete(chatId);
+        const result = await fleet.spawn(name, runtime as RuntimeType, workspaces[0].alias);
+        await bot.editMessageText(`✅ ${result}`, {
+          chat_id: Number(chatId),
+          message_id: msgId,
+        });
+        break;
+      }
       const wsButtons = workspaces.map((w) => [{
         text: `${w.alias} · ${w.path.split("/").pop()}`,
         callback_data: `new:exec:${name}:${runtime}:${w.alias}`,
@@ -348,9 +324,9 @@ async function handleClearFlow(
 }
 
 export function sendNewPrompt(bot: TelegramBot, chatId: string): void {
-  bot.sendMessage(Number(chatId), "🆕 Spawn a new agent:", {
+  bot.sendMessage(Number(chatId), "🐣 Hatch a new thronglet:", {
     reply_markup: {
-      inline_keyboard: [[{ text: "Start →", callback_data: "new:start" }]],
+      inline_keyboard: [[{ text: "Hatch →", callback_data: "new:start" }]],
     },
   }).catch(() => {});
 }
