@@ -11,7 +11,8 @@ export function WorkspaceHeader() {
   const filtered = currentWorkspace === "all" ? agents : agents.filter((a) => a.workspace === currentWorkspace);
   const working = filtered.filter((a) => a.status === "working").length;
   const errors = filtered.filter((a) => a.status === "error").length;
-  const idle = filtered.filter((a) => a.status === "idle").length;
+  const waiting = filtered.filter((a) => a.status === "waiting").length;
+  const sleeping = filtered.filter((a) => a.status === "sleeping").length;
   const dead = filtered.filter((a) => a.status === "stopped").length;
 
   const title = currentWorkspace === "all" ? "All Thronglets" : currentWorkspace;
@@ -41,8 +42,9 @@ export function WorkspaceHeader() {
       <div className="h-stats">
         <span><span className="v">{filtered.length}</span>total</span>
         <span><span className="v">{working}</span>grinding</span>
-        <span><span className="v">{errors}</span>sad</span>
-        <span><span className="v">{idle}</span>vibing</span>
+        <span><span className="v">{waiting}</span>waiting</span>
+        <span><span className="v">{sleeping}</span>sleeping</span>
+        {errors > 0 && <span><span className="v">{errors}</span>error</span>}
         {dead > 0 && <span><span className="v">{dead}</span>dead</span>}
       </div>
       <div className="stage-toolbar">

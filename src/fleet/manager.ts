@@ -101,11 +101,11 @@ export class FleetManager {
 
   private checkAgentHealth(): void {
     const now = Date.now();
+    let stateChanged = false;
     for (const [name, live] of this.agents) {
       if (live.state.status === "working" && live.state.lastActivity) {
         const elapsed = now - new Date(live.state.lastActivity).getTime();
         if (elapsed > SEND_TIMEOUT_MS + 30_000) {
-          // Agent has been "working" far longer than the timeout allows — mark dead
           live.state.status = "dead";
           live.state.inferred = `unresponsive for ${Math.round(elapsed / 60_000)}min — marked dead`;
           this.bus.publish("status_change", name, live.sessionId, { status: "dead" });
@@ -119,11 +119,26 @@ export class FleetManager {
             try { live.session.close(); } catch {}
             live.session = null;
           }
-          this.persistState();
+          stateChanged = true;
           console.log(`[fleet] ${name}: marked DEAD after ${Math.round(elapsed / 60_000)}min unresponsive`);
         }
       }
+
+      // Transition waiting → sleeping when session has been idle past max age
+      if (live.state.status === "waiting" && live.session && live.state.lastActivity) {
+        const idleMs = now - new Date(live.state.lastActivity).getTime();
+        if (idleMs > SESSION_MAX_AGE_MS) {
+          try { live.session.close(); } catch {}
+          live.session = null;
+          live.state.status = "sleeping";
+          live.state.inferred = `sleeping — idle for ${Math.round(idleMs / 60_000)}min, will reconnect on next message`;
+          this.bus.publish("status_change", name, live.sessionId, { status: "sleeping" });
+          stateChanged = true;
+          console.log(`[fleet] ${name}: waiting → sleeping after ${Math.round(idleMs / 60_000)}min`);
+        }
+      }
     }
+    if (stateChanged) this.persistState();
   }
 
   stopHealthCheck(): void {
@@ -208,7 +223,7 @@ export class FleetManager {
       model: agentDef.model,
       workspace: workspaceAlias,
       workspacePath,
-      status: "idle",
+      status: "waiting",
       currentSessionId: sessionId,
       spawnedAt: new Date().toISOString(),
       lastActivity: new Date().toISOString(),
@@ -282,14 +297,14 @@ export class FleetManager {
   }
 
   private async processMessage(name: string, live: LiveAgent, text: string, sender: MessageSender): Promise<string> {
-    // Auto-recover from dead/error — close stale session so a fresh one is created
-    if (live.state.status === "dead" || live.state.status === "error") {
-      console.log(`[fleet] ${name}: recovering from ${live.state.status} — creating fresh session`);
+    // Auto-recover from dead/error/sleeping — close stale session so a fresh one is created
+    if (live.state.status === "dead" || live.state.status === "error" || live.state.status === "sleeping") {
+      console.log(`[fleet] ${name}: waking from ${live.state.status} — creating fresh session`);
       if (live.session) {
         try { live.session.close(); } catch {}
         live.session = null;
       }
-      live.state.status = "idle";
+      live.state.status = "waiting";
     }
 
     // Proactive staleness check: if session has been idle too long, close it
@@ -297,7 +312,7 @@ export class FleetManager {
     if (live.session && live.state.lastActivity) {
       const idleMs = Date.now() - new Date(live.state.lastActivity).getTime();
       if (idleMs > SESSION_MAX_AGE_MS) {
-        console.log(`[fleet] ${name}: session idle for ${Math.round(idleMs / 60_000)}min — proactively closing`);
+        console.log(`[fleet] ${name}: session idle for ${Math.round(idleMs / 60_000)}min — closing, will reconnect on next message`);
         try { live.session.close(); } catch {}
         live.session = null;
       }
@@ -391,12 +406,12 @@ export class FleetManager {
       }
 
       live.state.messageCount++;
-      live.state.status = "idle";
-      live.state.inferred = "idle — waiting for input";
+      live.state.status = "waiting";
+      live.state.inferred = "waiting for input";
       live.state.lastActivity = new Date().toISOString();
       live.state.lastAgentMessage = reply!;
       this.bus.publish("agent_message", name, live.sessionId, { text: reply!, sender });
-      this.bus.publish("status_change", name, live.sessionId, { status: "idle" });
+      this.bus.publish("status_change", name, live.sessionId, { status: "waiting" });
       this.logToSession(name, live.sessionId, { type: "agent_message", text: reply!, replyTo: sender });
       this.persistState();
 
@@ -551,7 +566,7 @@ export class FleetManager {
       getToolInstructions(true),
       ``,
       `## Current fleet`,
-      `${status.total - 1} thronglets (${status.working} working, ${status.idle} idle, ${status.dead} dead)`,
+      `${status.total - 1} thronglets (${status.working} working, ${status.waiting} waiting, ${status.sleeping} sleeping, ${status.dead} dead)`,
       agentSummary || "  (no thronglets spawned — suggest spawning one)",
       ``,
       `## Workspaces`,
@@ -596,7 +611,7 @@ export class FleetManager {
 
     live.sessionId = newSessionId;
     live.state.currentSessionId = newSessionId;
-    live.state.status = "idle";
+    live.state.status = "waiting";
     live.state.messageCount = 0;
     live.state.sessionName = undefined;
     live.state.lastActivity = new Date().toISOString();
@@ -674,13 +689,14 @@ export class FleetManager {
     return this.agents.get(name)?.processing ?? false;
   }
 
-  getStatus(): { agents: AgentState[]; total: number; working: number; idle: number; dead: number } {
+  getStatus(): { agents: AgentState[]; total: number; working: number; waiting: number; sleeping: number; dead: number } {
     const agents = Array.from(this.agents.values()).map((a) => a.state);
     return {
       agents,
       total: agents.length,
       working: agents.filter((a) => a.status === "working").length,
-      idle: agents.filter((a) => a.status === "idle").length,
+      waiting: agents.filter((a) => a.status === "waiting").length,
+      sleeping: agents.filter((a) => a.status === "sleeping").length,
       dead: agents.filter((a) => a.status === "dead").length,
     };
   }
@@ -727,8 +743,9 @@ export class FleetManager {
       const agentDef = this.config.getAgentDef(agentState.runtime as RuntimeType);
       const runtimeInstance = this.config.createRuntime(agentDef);
 
-      // On restart: "working" becomes "idle" (stale), "dead"/"error" preserved for visibility
-      const restoredStatus = (agentState.status === "working") ? "idle" : agentState.status;
+      // On restart: active states become "sleeping" (session gone), handle legacy "idle" too
+      const rawStatus = agentState.status as string;
+      const restoredStatus: AgentStatus = (rawStatus === "working" || rawStatus === "waiting" || rawStatus === "idle") ? "sleeping" : agentState.status;
       this.agents.set(name, {
         state: { ...agentState, status: restoredStatus },
         runtime: runtimeInstance,

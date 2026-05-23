@@ -21,7 +21,8 @@ export function Dispatcher() {
   const filtered = currentWorkspace === "all" ? agents : agents.filter((a) => a.workspace === currentWorkspace);
   const working = filtered.filter((a) => a.status === "working");
   const errors = filtered.filter((a) => a.status === "error");
-  const idle = filtered.filter((a) => a.status === "idle");
+  const waiting = filtered.filter((a) => a.status === "waiting");
+  const sleeping = filtered.filter((a) => a.status === "sleeping");
   const dead = filtered.filter((a) => a.status === "stopped");
 
   const runtimes = ["cursor", "claude-code", "codex"];
@@ -33,7 +34,8 @@ export function Dispatcher() {
       color: AGENT_COLORS[rt] || "#888",
       total: mine.length,
       working: mine.filter((a) => a.status === "working").length,
-      idle: mine.filter((a) => a.status === "idle").length,
+      waiting: mine.filter((a) => a.status === "waiting").length,
+      sleeping: mine.filter((a) => a.status === "sleeping").length,
       error: mine.filter((a) => a.status === "error").length,
     };
   }).filter((f) => f.total > 0);
@@ -93,8 +95,12 @@ export function Dispatcher() {
           <div className="k">distressed 😰</div>
         </div>
         <div className="df-stat">
-          <div className="v">{idle.length + dead.length}</div>
-          <div className="k">vibing 😴</div>
+          <div className="v">{waiting.length}</div>
+          <div className="k">waiting 👀</div>
+        </div>
+        <div className="df-stat">
+          <div className="v">{sleeping.length + dead.length}</div>
+          <div className="k">sleeping 💤</div>
         </div>
       </div>
 
@@ -119,14 +125,15 @@ export function Dispatcher() {
                     </div>
                     <div className="df-fleet-bar">
                       {f.working > 0 && <span className="seg working" style={{ flex: f.working }}></span>}
-                      {f.error > 0 && <span className="seg waiting" style={{ flex: f.error }}></span>}
-                      {f.idle > 0 && <span className="seg idle" style={{ flex: f.idle }}></span>}
+                      {f.waiting > 0 && <span className="seg waiting" style={{ flex: f.waiting }}></span>}
+                      {f.sleeping > 0 && <span className="seg sleeping" style={{ flex: f.sleeping }}></span>}
+                      {f.error > 0 && <span className="seg error" style={{ flex: f.error }}></span>}
                       {f.total === 0 && <span className="seg ghost" style={{ flex: 1 }}></span>}
                     </div>
                     <div className="df-fleet-counts">
                       <span><span className="d working"></span>{f.working} grinding</span>
-                      <span><span className="d idle"></span>{f.idle} vibing</span>
-                      <span><span className="d error"></span>{f.error} sad</span>
+                      <span><span className="d waiting"></span>{f.waiting} waiting</span>
+                      <span><span className="d sleeping"></span>{f.sleeping} sleeping</span>
                     </div>
                   </div>
                 </div>
@@ -183,22 +190,45 @@ export function Dispatcher() {
           </div>
         )}
 
-        {/* Idle */}
-        {idle.length > 0 && (
+        {/* Waiting */}
+        {waiting.length > 0 && (
           <div className="df-section">
             <div className="df-section-label">
-              <span>Vibing ✨</span>
-              <span className="df-section-aux">{idle.length}</span>
+              <span>Waiting 👀</span>
+              <span className="df-section-aux">{waiting.length}</span>
             </div>
             <div className="df-list">
-              {idle.map((a) => (
+              {waiting.map((a) => (
                 <div key={a.name} className="df-row">
-                  <span className="df-row-dot" style={{ background: "var(--st-idle)" }}></span>
+                  <span className="df-row-dot" style={{ background: "var(--st-waiting)" }}></span>
                   <div className="df-row-body">
                     <div className="df-row-title">
                       <span className="codename">{a.name}</span>
                     </div>
-                    <div className="df-row-sub">{a.inferred || "chilling..."}</div>
+                    <div className="df-row-sub">{a.inferred || "ready..."}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Sleeping */}
+        {sleeping.length > 0 && (
+          <div className="df-section">
+            <div className="df-section-label">
+              <span>Sleeping 💤</span>
+              <span className="df-section-aux">{sleeping.length}</span>
+            </div>
+            <div className="df-list">
+              {sleeping.map((a) => (
+                <div key={a.name} className="df-row">
+                  <span className="df-row-dot" style={{ background: "var(--st-sleeping)" }}></span>
+                  <div className="df-row-body">
+                    <div className="df-row-title">
+                      <span className="codename">{a.name}</span>
+                    </div>
+                    <div className="df-row-sub">{a.inferred || "zzz..."}</div>
                   </div>
                 </div>
               ))}

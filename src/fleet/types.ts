@@ -1,6 +1,6 @@
 import type { RuntimeType } from "../config.js";
 
-export type AgentStatus = "idle" | "working" | "error" | "stopped" | "dead";
+export type AgentStatus = "waiting" | "sleeping" | "working" | "error" | "stopped" | "dead";
 
 export type FleetEventType =
   | "agent_spawned"

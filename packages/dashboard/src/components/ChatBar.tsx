@@ -124,7 +124,7 @@ export function ChatBar() {
             <div className="agent-selector-dropdown">
               <div className="asd-head">Send to</div>
               {agents.filter((a) => a.name !== "_dispatcher").map((a) => {
-                const meta = STATUS_META[a.status] || STATUS_META.idle;
+                const meta = STATUS_META[a.status] || STATUS_META.waiting;
                 return (
                   <button
                     key={a.name}

@@ -41,7 +41,7 @@ const TOOLS: Record<string, ToolDef> = {
         `  @${a.name}${a.title ? ` (${a.title})` : ""}: ${a.runtime} · ${a.workspace} · ${a.status}${a.sessionName ? ` 「${a.sessionName}」` : ""}`
       ).join("\n");
       const wsLines = workspaces.map((w) => `  ${w.alias}: ${w.path}`).join("\n");
-      return `Fleet: ${status.total} agents (${status.working} working, ${status.idle} idle, ${status.dead} dead)\n${agentLines}\n\nWorkspaces:\n${wsLines}`;
+      return `Fleet: ${status.total} agents (${status.working} working, ${status.waiting} waiting, ${status.sleeping} sleeping, ${status.dead} dead)\n${agentLines}\n\nWorkspaces:\n${wsLines}`;
     },
   },
 

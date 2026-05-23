@@ -300,7 +300,7 @@ async function main() {
           }
 
           const statusEmoji = (s: string) =>
-            s === "working" ? "🔨" : s === "idle" ? "💤" : s === "dead" ? "☠️" : s === "error" ? "❌" : "⚫";
+            s === "working" ? "🔨" : s === "waiting" ? "👀" : s === "sleeping" ? "💤" : s === "dead" ? "☠️" : s === "error" ? "❌" : "⚫";
 
           const grouped = new Map<string, typeof thronglets>();
           for (const a of thronglets) {
@@ -320,10 +320,12 @@ async function main() {
           }
 
           const working = thronglets.filter((a) => a.status === "working").length;
-          const idle = thronglets.filter((a) => a.status === "idle").length;
+          const waiting = thronglets.filter((a) => a.status === "waiting").length;
+          const sleeping = thronglets.filter((a) => a.status === "sleeping").length;
           const dead = thronglets.filter((a) => a.status === "dead" || a.status === "stopped").length;
           const errored = thronglets.filter((a) => a.status === "error").length;
-          const parts = [`${working} working`, `${idle} idle`];
+          const parts = [`${working} working`, `${waiting} waiting`];
+          if (sleeping) parts.push(`${sleeping} sleeping`);
           if (dead) parts.push(`${dead} dead`);
           if (errored) parts.push(`${errored} error`);
 

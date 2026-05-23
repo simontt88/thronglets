@@ -22,18 +22,10 @@ export function SessionCard({ agent, placement }: Props) {
 
   const isDispatcher = agent.name === "_dispatcher";
   const accent = isDispatcher ? "#7c6af7" : getAgentAccent(agent);
-  const meta = STATUS_META[agent.status] || STATUS_META.idle;
+  const meta = STATUS_META[agent.status] || STATUS_META.waiting;
   const isSelected = selectedAgent === agent.name;
   const isWorking = agent.status === "working";
   const isDead = agent.status === "stopped" || agent.status === "dead";
-
-  // Re-tick every 60s so idle→sleeping transition happens live
-  const [, setTick] = useState(0);
-  useEffect(() => {
-    if (agent.status !== "idle") return;
-    const id = setInterval(() => setTick((t) => t + 1), 60_000);
-    return () => clearInterval(id);
-  }, [agent.status]);
 
   const mood = statusToMood(agent.status, agent.lastActivity);
   const thronglet = useMemo(() => generateThronglet(agent.name), [agent.name]);

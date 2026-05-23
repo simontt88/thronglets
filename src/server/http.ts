@@ -45,7 +45,8 @@ export function createHttpApp(
       agents: status.agents,
       total: status.total,
       working: status.working,
-      idle: status.idle,
+      waiting: status.waiting,
+      sleeping: status.sleeping,
       workspaces: workspaces.map((w) => ({ alias: w.alias, path: w.path })),
       runtimes: config.agents.map((a) => ({ name: a.name, runtime: a.runtime, model: a.model })),
     });

@@ -9,7 +9,7 @@ export interface AgentState {
   model: string;
   workspace: string;
   workspacePath: string;
-  status: "idle" | "working" | "error" | "stopped" | "dead";
+  status: "waiting" | "sleeping" | "working" | "error" | "stopped" | "dead";
   currentSessionId: string;
   spawnedAt: string;
   lastActivity: string;
