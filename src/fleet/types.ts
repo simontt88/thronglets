@@ -34,6 +34,9 @@ export interface AgentState {
   spawnedAt: string;
   lastActivity: string;
   messageCount: number;
+  lastUserMessage?: string;
+  lastAgentMessage?: string;
+  inferred?: string;
 }
 
 export interface FleetState {

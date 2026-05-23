@@ -55,14 +55,14 @@ function parseArgs(args: string[]): CliOptions {
 
 function printHelp() {
   console.log(`
-agent-bridge — Bridge local workspace agent capabilities to messaging platforms
+kenyalang — Bridge local workspace agent capabilities to messaging platforms
 
 Usage:
-  agent-bridge start [options]     Start the bridge (default command)
-  agent-bridge setup               Configure global credentials
-  agent-bridge rules sync          Sync .cursor/rules/ → .claude/rules/ + Codex
-  agent-bridge rules status        Show rules sync status
-  agent-bridge help                Show this help
+  kenyalang start [options]     Start the bridge (default command)
+  kenyalang setup               Configure global credentials
+  kenyalang rules sync          Sync .cursor/rules/ → .claude/rules/ + Codex
+  kenyalang rules status        Show rules sync status
+  kenyalang help                Show this help
 
 Options:
   -w, --workspace <path>   Target workspace directory (default: cwd)
@@ -75,7 +75,7 @@ Config resolution (highest to lowest priority):
   1. CLI args (--workspace, --model, etc.)
   2. Environment variables
   3. {workspace}/bridge.yaml (workspace-local)
-  4. ~/.agent-bridge/config.yaml (global defaults)
+  4. ~/.kenyalang/config.yaml (global defaults)
 
 Environment variables:
   TELEGRAM_BOT_TOKEN       Telegram bot token

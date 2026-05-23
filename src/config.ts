@@ -58,7 +58,7 @@ export interface BridgeConfig {
   session?: SessionConfig;
 }
 
-const GLOBAL_CONFIG_DIR = join(homedir(), ".agent-bridge");
+const GLOBAL_CONFIG_DIR = join(homedir(), ".kenyalang");
 const GLOBAL_CONFIG_PATH = join(GLOBAL_CONFIG_DIR, "config.yaml");
 
 function resolveEnvVars(value: string): string {
@@ -215,7 +215,7 @@ export function loadConfig(): BridgeConfig {
           : join(workspace, config.session.storeDir)
     );
   } else {
-    config.session.storeDir = join(workspace, ".agent-bridge");
+    config.session.storeDir = join(workspace, ".kenyalang");
   }
 
   return config;

@@ -1,4 +1,4 @@
-# Agent Bridge
+# Kenyalang
 
 Bridge your local workspace's full Cursor-like agent capabilities to any messaging platform.
 
@@ -18,8 +18,8 @@ Takes any directory on your machine and makes it accessible via a messaging bot 
 ## Quick Start
 
 ```bash
-git clone <this-repo> agent-bridge
-cd agent-bridge
+git clone https://github.com/simontt88/kenyalang.git
+cd kenyalang
 npm install
 
 # Option A: env vars

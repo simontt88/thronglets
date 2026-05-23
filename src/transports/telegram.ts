@@ -4,7 +4,7 @@ import { join } from "path";
 import { homedir } from "os";
 import type { Transport, IncomingMessage, TransportOptions } from "./interface.js";
 
-const PID_FILE = join(homedir(), ".agent-bridge", "bridge.pid");
+const PID_FILE = join(homedir(), ".kenyalang", "bridge.pid");
 
 export interface TelegramConfig {
   token: string;

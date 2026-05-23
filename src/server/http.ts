@@ -86,6 +86,27 @@ export function createHttpApp(
     }
   });
 
+  app.get("/api/agents/:name/tail", (req, res) => {
+    const name = req.params.name;
+    if (!fleet.hasAgent(name)) {
+      res.status(404).json({ error: `Agent "${name}" not found` });
+      return;
+    }
+    const limit = Math.min(parseInt(req.query.limit as string) || 5, 50);
+    const agent = fleet.getAgent(name)!;
+    const sessionsDir = getSessionsDir(name);
+    try {
+      const sessionFile = `${sessionsDir}/${agent.currentSessionId}.jsonl`;
+      const lines = readFileSync(sessionFile, "utf-8").trim().split("\n");
+      const events = lines.slice(-limit).map((l) => {
+        try { return JSON.parse(l); } catch { return null; }
+      }).filter(Boolean);
+      res.json({ sessionId: agent.currentSessionId, events });
+    } catch {
+      res.json({ sessionId: agent.currentSessionId, events: [] });
+    }
+  });
+
   app.post("/api/agents/:name/send", async (req, res) => {
     const name = req.params.name;
     const { text } = req.body;
@@ -128,6 +149,16 @@ export function createHttpApp(
       return;
     }
     const result = await fleet.kill(name);
+    res.json({ message: result });
+  });
+
+  app.post("/api/agents/:name/clear", async (req, res) => {
+    const name = req.params.name;
+    if (!fleet.hasAgent(name)) {
+      res.status(404).json({ error: `Agent "${name}" not found` });
+      return;
+    }
+    const result = await fleet.clear(name);
     res.json({ message: result });
   });
 

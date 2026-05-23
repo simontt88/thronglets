@@ -12,7 +12,7 @@ cursor:
 
 # Optional: local conversation logs
 session:
-  log_dir: ~/.agent-bridge/logs
+  log_dir: ~/.kenyalang/logs
 
   # Optional: sync conversations to a recall API
   # recall_api: https://your-api/api/sync/ingest

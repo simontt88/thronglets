@@ -1,10 +1,10 @@
 {
-  "name": "agent-bridge",
+  "name": "kenyalang",
   "version": "0.5.0",
   "description": "Multi-agent fleet orchestrator — bridge workspace capabilities to Telegram/Lark/Discord with Cursor, Claude Code, and Codex",
   "type": "module",
   "bin": {
-    "agent-bridge": "./bin/agent-bridge.js"
+    "kenyalang": "./bin/kenyalang.js"
   },
   "scripts": {
     "start": "node --import tsx src/index.ts",

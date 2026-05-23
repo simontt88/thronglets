@@ -146,7 +146,9 @@ export class FleetManager {
 
     this.processing.add(name);
     live.state.status = "working";
+    live.state.inferred = "processing message";
     live.state.lastActivity = new Date().toISOString();
+    live.state.lastUserMessage = text;
     this.bus.publish("status_change", name, live.sessionId, { status: "working" });
     this.bus.publish("user_message", name, live.sessionId, { text });
     this.logToSession(name, live.sessionId, { type: "user_message", text });
@@ -174,7 +176,9 @@ export class FleetManager {
 
       live.state.messageCount++;
       live.state.status = "idle";
+      live.state.inferred = "idle — waiting for input";
       live.state.lastActivity = new Date().toISOString();
+      live.state.lastAgentMessage = reply;
       this.bus.publish("agent_message", name, live.sessionId, { text: reply });
       this.bus.publish("status_change", name, live.sessionId, { status: "idle" });
       this.logToSession(name, live.sessionId, { type: "agent_message", text: reply });
@@ -184,6 +188,7 @@ export class FleetManager {
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       live.state.status = "error";
+      live.state.inferred = `error: ${errMsg.slice(0, 80)}`;
       this.bus.publish("error", name, live.sessionId, { error: errMsg });
       this.logToSession(name, live.sessionId, { type: "error", error: errMsg });
       this.persistState();

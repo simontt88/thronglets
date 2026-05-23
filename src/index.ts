@@ -97,7 +97,7 @@ async function ensureRulesSync(agentDef: AgentDef, workspace: string) {
 }
 
 function loadWorkspaces(): WorkspaceEntry[] {
-  const wsFile = join(homedir(), ".agent-bridge", "workspaces.yaml");
+  const wsFile = join(homedir(), ".kenyalang", "workspaces.yaml");
   if (!existsSync(wsFile)) return [];
   try {
     const raw = parseYaml(readFileSync(wsFile, "utf-8"));
@@ -186,7 +186,7 @@ async function main() {
             ? `\nActive agents: ${currentFleet.join(", ")}\nSend messages directly or use @name prefix.`
             : "\nNo agents running yet. Spawn one to get started:";
           const welcome = [
-            "\u{1F916} Agent Bridge v0.4.0",
+            "\u{1F916} Kenyalang v0.5.0",
             "",
             "Multi-agent fleet orchestrator — each agent runs in a workspace with full file/shell/git access.",
             "",
@@ -414,7 +414,7 @@ async function main() {
     }
   }
 
-  console.log(`\nAgent Bridge v0.5.0 (Fleet Mode)`);
+  console.log(`\nKenyalang v0.5.0 (Fleet Mode)`);
   console.log(`  Transport:   ${transport.name}`);
   console.log(`  API:         http://127.0.0.1:${port}`);
   console.log(`  WebSocket:   ws://127.0.0.1:${port}/ws`);
