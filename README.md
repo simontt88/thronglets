@@ -29,15 +29,24 @@
 
 ## Why "Thronglets"?
 
-The name is from *Black Mirror* — digital creatures with personalities inside a simulation. The connection to multi-agent orchestration is loose at best. But the name stuck.
+The name comes from *Black Mirror* — those little digital creatures living inside a simulation. We thought it was funny for coding agents. It stuck.
 
-The real idea: your most powerful agent already exists — it's your Cursor session, your Claude Code terminal, sitting in your workspace. It knows your codebase, your conventions, your half-finished TODOs. It just never leaves the room.
+Here's the thing: you already have great AI agents. Your Cursor session knows your codebase. Your Claude Code terminal can refactor anything. But they're each stuck in their own window, and you're the only one routing work between them.
 
-Thronglets is the missing step. Give each agent a name, a face, a mood. Connect them. Your workspace **is** the harness — all you add is a dispatcher and a message bus. One agent refactors, another reviews, a third writes tests. You watch pixel creatures grind from a Telegram chat while you're on the bus.
+So we built the missing piece — a **dispatcher agent** that sits in its own workspace, sees the entire fleet, and routes tasks to the right thronglet. You just type into Telegram. The dispatcher figures out who's free, what workspace matches, and forwards your message. When you're not even talking, you can `/poke` the dispatcher and it'll look at its goal and start assigning work to idle agents on its own.
 
-Not a new AI framework. Just identity and coordination on top of tools you already use.
+Every thronglet gets a procedurally generated name and a pixel art face. Same name always produces the same creature. They have moods — grinding, waiting, sleeping, dead. It's cosmetic, but it makes you actually care when one of them dies.
 
-> **One command. Multiple agents. Multiple runtimes. One chat.**
+```
+You:        fix the tests          (no @mention — dispatcher handles it)
+Dispatcher: Routing to Kilo (idle, assigned to infra workspace)
+Kilo:       Found the issue — Node 18 assertion, fixing...
+
+You:        @Vexo refactor the auth module
+Vexo:       On it — restructuring into middleware pattern...
+```
+
+Not a new AI framework. No DSL, no "agentic workflow engine." Just identity, a dispatcher, and a message bus on top of tools you already use.
 
 ## Quick Start
 
@@ -74,7 +83,7 @@ Open Telegram → `/new` → watch your first thronglet hatch.
 |---------|-------------|
 | **Fleet Management** | Spawn, kill, reconfigure agents on the fly. Each has its own session, workspace, and identity |
 | **Procedural Avatars** | Every agent gets a unique pixel art creature — deterministic from name, with mood animations (idle, working, happy, sleeping, dead) |
-| **Smart Dispatcher** | AI-powered message router. No @mention needed — dispatcher picks the best idle agent by workspace and context |
+| **Dispatcher Agent** | A dedicated agent with its own workspace that manages the fleet. Routes messages by workspace match and runtime strength. Has a persistent goal — `/poke` it and it autonomously assigns work to idle thronglets |
 | **Multi-Runtime** | Cursor SDK, Claude Code CLI, OpenAI Codex — mix runtimes in the same fleet |
 | **Multi-Platform** | Telegram (primary), Lark/Feishu, Discord transports |
 | **Web Dashboard** | Real-time fleet visualization with session history, live output streaming, and agent state |
@@ -88,16 +97,19 @@ Open Telegram → `/new` → watch your first thronglet hatch.
 ```
                    ┌─────────────────────────────────┐
                    │         Your Telegram Chat       │
-                   │  "@Vexo fix the login bug"       │
+                   │  "fix the tests"                 │
                    └────────────┬────────────────────┘
                                 │
                    ┌────────────▼────────────────────┐
                    │       Thronglets Server          │
+                   │                                  │
                    │  ┌──────────────────────────┐   │
-                   │  │    Smart Dispatcher       │   │
-                   │  │  (routes unaddressed msgs)│   │
+                   │  │   Orix (Dispatcher)       │   │
+                   │  │   own workspace + goal    │   │
+                   │  │   sees entire fleet state  │   │
+                   │  │   routes by ws + runtime   │   │
                    │  └──────────┬───────────────┘   │
-                   │             │                    │
+                   │        fleet_send               │
                    │  ┌──────┬──┴──┬──────┐          │
                    │  │ Vexo │Kilo │ Paxi │ ...      │
                    │  │cursor│codex│claude│          │
@@ -110,6 +122,8 @@ Open Telegram → `/new` → watch your first thronglet hatch.
                    │  └──────────────────┘           │
                    └─────────────────────────────────┘
 ```
+
+The **dispatcher** is itself an agent (named Orix) with its own workspace. It receives every unaddressed message, sees the full fleet status (who's idle, who's working, which workspace each agent is in), and forwards tasks using `fleet_send`. It maintains a persistent goal — `/poke` it and it proactively assigns work to idle thronglets.
 
 Each thronglet runs as a separate agent session:
 - **Cursor agents** use `@cursor/sdk` — full IDE capabilities, file editing, terminal access
