@@ -106,6 +106,16 @@ const TOOLS: Record<string, ToolDef> = {
       return result;
     },
   },
+
+  fleet_set_goal: {
+    permission: "dispatcher",
+    async execute(args, _agentName, fleet) {
+      const goal = args.goal as string;
+      if (!goal) return "Error: fleet_set_goal requires 'goal'";
+      fleet.setGoal(goal);
+      return `Goal set: ${goal.slice(0, 200)}`;
+    },
+  },
 };
 
 export function createPostReplyHook(
@@ -171,6 +181,7 @@ You can execute fleet operations by including markers in your reply:
 - Add workspace: [FLEET:fleet_workspace_add:{"alias":"short-name","path":"/absolute/path"}]
 - List workspaces: [FLEET:fleet_workspace_list:{}]
 - Set agent title: [FLEET:fleet_set_title:{"name":"agentname","title":"QA master"}]
+- Set fleet goal: [FLEET:fleet_set_goal:{"goal":"Build and test the auth module"}]
 
 You can include multiple markers in one reply. Results are logged to your session.
 Include the marker anywhere in your reply text — it will be stripped before showing to the user.

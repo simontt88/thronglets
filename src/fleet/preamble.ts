@@ -27,6 +27,7 @@ export function buildDispatcherPreamble(
   status: FleetSnapshot,
   workspaces: WorkspaceEntry[],
   sessionsDir: string,
+  goal?: string,
 ): string {
   const agentSummary = status.agents
     .filter((a) => a.name !== "_dispatcher")
@@ -71,5 +72,9 @@ export function buildDispatcherPreamble(
     ``,
     `## Workspaces`,
     wsSummary || "  (none configured)",
+    ``,
+    goal
+      ? `## Current goal\n${goal}\n\nUse this goal to guide your routing decisions. When poked, autonomously assign tasks to idle agents based on this goal and recent progress.`
+      : `## No goal set\nOn your FIRST reply to the user, briefly ask what the fleet should focus on. Once they tell you, persist it with fleet_set_goal. Example: "What should the fleet focus on? I'll coordinate once I know the goal."`,
   ].join("\n");
 }

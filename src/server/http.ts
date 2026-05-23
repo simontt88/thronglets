@@ -227,5 +227,34 @@ export function createHttpApp(
     res.json({ message: result });
   });
 
+  const POKE_MESSAGE = `[POKE] The user wants you to keep the fleet working. Review the current goal, check fleet status, and assign/reassign tasks to idle agents based on what needs to be done next. Be autonomous — don't ask, just dispatch.`;
+
+  app.post("/api/fleet/poke", async (_req, res) => {
+    if (!fleet.hasAgent("_dispatcher")) {
+      res.status(503).json({ error: "Dispatcher is offline" });
+      return;
+    }
+    const goal = fleet.getGoal();
+    const msg = goal
+      ? POKE_MESSAGE
+      : `[POKE] The user poked you. There is no goal set yet — ask the user what the fleet should focus on, then set it with fleet_set_goal.`;
+    fleet.send("_dispatcher", msg, "user").catch(() => {});
+    res.json({ ok: true, message: "Dispatcher poked" });
+  });
+
+  app.get("/api/fleet/goal", (_req, res) => {
+    res.json({ goal: fleet.getGoal() });
+  });
+
+  app.post("/api/fleet/goal", (req, res) => {
+    const { goal } = req.body;
+    if (typeof goal !== "string") {
+      res.status(400).json({ error: "goal (string) is required" });
+      return;
+    }
+    fleet.setGoal(goal);
+    res.json({ ok: true, goal });
+  });
+
   return app;
 }

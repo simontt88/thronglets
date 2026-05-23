@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Thronglets</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#1a3a10;overflow:hidden;font-family:'Courier New',monospace;cursor:crosshair;user-select:none}
+canvas{display:block}
+#ui{position:fixed;top:0;left:0;right:0;display:flex;justify-content:center;gap:6px;
+  padding:6px 12px;z-index:10;pointer-events:none}
+#ui>div{background:rgba(10,20,5,.82);padding:5px 14px;border-radius:0 0 8px 8px;
+  font-size:12px;color:#b8d8a0;display:flex;align-items:center;gap:8px;
+  border:1px solid rgba(100,160,60,.2);border-top:none;pointer-events:auto;backdrop-filter:blur(6px)}
+.stat{display:flex;align-items:center;gap:3px}
+.stat b{color:#dff0c8;font-size:13px}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+.dot-work{background:#f0c040;box-shadow:0 0 4px #f0c040}
+.dot-wait{background:#60b070}
+.dot-sleep{background:#607090}
+.dot-dead{background:#a04040}
+#tools{position:fixed;bottom:0;left:50%;transform:translateX(-50%);display:flex;gap:0;z-index:10}
+#tools button{background:rgba(10,20,5,.82);color:#b8d8a0;border:1px solid rgba(100,160,60,.15);
+  padding:8px 16px;font:12px 'Courier New',monospace;cursor:pointer;
+  transition:all .15s;backdrop-filter:blur(6px)}
+#tools button:first-child{border-radius:8px 0 0 0}
+#tools button:last-child{border-radius:0 8px 0 0}
+#tools button:hover{background:rgba(30,60,15,.9);color:#dff0c8}
+#tools button.on{background:rgba(60,120,30,.35);color:#bef07a;border-color:rgba(100,200,50,.3)}
+#tools .key{font-size:9px;opacity:.5;margin-left:4px}
+#tip{position:fixed;pointer-events:none;z-index:20;background:rgba(10,20,5,.9);color:#dff0c8;
+  font:11px 'Courier New',monospace;padding:6px 10px;border-radius:5px;
+  border:1px solid rgba(100,160,60,.25);display:none;max-width:200px;backdrop-filter:blur(6px)}
+</style>
+</head>
+<body>
+<div id="ui">
+  <div>
+    <span class="stat">🐣 <b id="n">0</b></span>
+    <span class="stat"><span class="dot dot-work"></span><b id="sw">0</b></span>
+    <span class="stat"><span class="dot dot-wait"></span><b id="si">0</b></span>
+    <span class="stat"><span class="dot dot-sleep"></span><b id="ss">0</b></span>
+    <span class="stat">🍖 <b id="f">0</b></span>
+    <span class="stat">💬 <b id="c">0</b></span>
+    <span class="stat" id="time-indicator" style="opacity:.7">☀️ <b id="tod">day</b></span>
+  </div>
+</div>
+<div id="tools">
+  <button class="on" onclick="setTool('feed')">🍖 Feed<span class="key">1</span></button>
+  <button onclick="setTool('pet')">✋ Pet<span class="key">2</span></button>
+  <button onclick="setTool('poke')">👆 Poke<span class="key">3</span></button>
+  <button onclick="setTool('spawn')">🥚 Hatch<span class="key">4</span></button>
+  <button onclick="setTool('inspect')">🔍 Info<span class="key">5</span></button>
+  <button onclick="cycleTimeSpeed()" id="time-btn">⏩ 1×<span class="key">T</span></button>
+</div>
+<div id="tip"></div>
+<canvas id="cv"></canvas>
+<script>
+// ============================================================
+// THRONGLET GENERATION SYSTEM (ported from dashboard)
+// ============================================================
+
+const GRID = 24;
+
+const COLOR = {
+  TRANSPARENT: 0, BODY: 1, BODY_SHADE: 2, BODY_LITE: 3,
+  EARS: 4, EARS_DEEP: 5, EYE_WHITE: 6, PUPIL: 7,
+  MOUTH: 8, SASH: 9, SASH_SHADE: 10, OUTLINE: 11, ACCENT: 12,
+};
+
+// --- Hash ---
+function hash32(input) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < input.length; i++) {
+    h ^= input.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+function pickIdx(value, n) { return (value >>> 0) % n; }
+
+// --- Palettes (8) ---
+const PALETTES = {
+  amber: { body:'#f3c33a', bodyShade:'#c98a1e', bodyLite:'#fde07a', ears:'#c4732e', earsDeep:'#7c3d18', eyeWhite:'#fff8e0', pupil:'#1a1a1a', mouth:'#7a4220', sash:'#4eb3e6', sashShade:'#2e7eb5', outline:'#3a2614', accent:'#ffe066' },
+  ember: { body:'#f0a87a', bodyShade:'#c4724a', bodyLite:'#ffd4ad', ears:'#d4724a', earsDeep:'#7c3018', eyeWhite:'#fff0e0', pupil:'#2a1010', mouth:'#5a2418', sash:'#c83a3a', sashShade:'#7a1f1f', outline:'#3a1410', accent:'#ff9544' },
+  mint: { body:'#9fd97a', bodyShade:'#5e9e3e', bodyLite:'#d5f0b0', ears:'#5a8e3a', earsDeep:'#2e5a1e', eyeWhite:'#f0fde0', pupil:'#0e2a0e', mouth:'#2a4a18', sash:'#e8a93a', sashShade:'#9c6810', outline:'#1e3a14', accent:'#c4f070' },
+  frost: { body:'#a0d4f0', bodyShade:'#5e9ec4', bodyLite:'#d4ecff', ears:'#5a8ab8', earsDeep:'#2a4a78', eyeWhite:'#f0f8ff', pupil:'#0e1e3a', mouth:'#2a3a5a', sash:'#f4d870', sashShade:'#c49a20', outline:'#1a2a4a', accent:'#e8f0ff' },
+  dusk: { body:'#b89cd8', bodyShade:'#7e5ea8', bodyLite:'#e0c8f0', ears:'#7e5ea8', earsDeep:'#3e2860', eyeWhite:'#fff0ff', pupil:'#1e0a2a', mouth:'#4a285a', sash:'#ff8fc8', sashShade:'#c44a8a', outline:'#2a1438', accent:'#e8c0ff' },
+  rose: { body:'#f0a8c0', bodyShade:'#c47090', bodyLite:'#ffd0e0', ears:'#c47090', earsDeep:'#7a2a50', eyeWhite:'#fff0f4', pupil:'#2a1018', mouth:'#7a2840', sash:'#7adfb8', sashShade:'#3a9078', outline:'#3a1424', accent:'#ffd4e4' },
+  bone: { body:'#e8dcb8', bodyShade:'#a8946a', bodyLite:'#faf0d0', ears:'#a8946a', earsDeep:'#5e4a2a', eyeWhite:'#fffcf0', pupil:'#1a1410', mouth:'#4a3618', sash:'#7aa8b8', sashShade:'#3a6878', outline:'#2a200e', accent:'#fff4c0' },
+  ink: { body:'#6a7090', bodyShade:'#3a4060', bodyLite:'#a0a8c8', ears:'#3a4060', earsDeep:'#1a1e34', eyeWhite:'#e0e4f8', pupil:'#fffacc', mouth:'#1a1e34', sash:'#d8a040', sashShade:'#8a5e1a', outline:'#0a0e1a', accent:'#9aa4cc' },
+};
+const PALETTE_NAMES = Object.keys(PALETTES);
+
+// --- Naming ---
+const SYLLABLES = ['bo','ka','mi','ra','ze','fi','lu','no','vi','ta','re','xu','qi','jo','wa','ne','su','pe','da','ko'];
+function pickName(h) {
+  const s1 = SYLLABLES[pickIdx(h >>> 0, SYLLABLES.length)];
+  const s2 = SYLLABLES[pickIdx(h >>> 5, SYLLABLES.length)];
+  const s3 = Math.random() < 0.3 ? SYLLABLES[pickIdx(h >>> 10, SYLLABLES.length)] : '';
+  return (s1 + s2 + s3).charAt(0).toUpperCase() + (s1 + s2 + s3).slice(1);
+}
+
+// --- Grid helpers ---
+function emptyGrid() { return new Uint8Array(GRID * GRID); }
+function setPx(g, x, y, c) { if (x >= 0 && y >= 0 && x < GRID && y < GRID) g[y * GRID + x] = c; }
+function getPx(g, x, y) { return (x >= 0 && y >= 0 && x < GRID && y < GRID) ? g[y * GRID + x] : 0; }
+
+// --- Species (silhouette) ---
+const SILHOUETTE = [
+  "........................", "........................", "........................",
+  ".....OOOOO..OOOOO.......", "....ObbbbbOObbbbbO......", "....ObbbbbbbbbbbbO......",
+  "...ObLLLbbbbbbbLLLbO....", "..ObLLLbbbbbbbbbbLLLbO..", "..ObbbbbbbbbbbbbbbbbbO..",
+  "..ObbbbbbbbbbbbbbbbbbO..", "..ObbbbbbbbbbbbbbbbbbO..", "..ObbbbbbbbbbbbbbbbbbO..",
+  "..ObbSSbbbbbbbbbbSSbbO..", "..ObbSSbbbbbbbbbbSSbbO..", "..ObbbbbbbbbbbbbbbbbbO..",
+  "...ObbbbbbbbbbbbbbbbO...", "....ObbbbbbbbbbbbbbO....", "....ObbbbbbbbbbbbbbO....",
+  "....ObbbbbbbbbbbbbbO....", "....ObbbbbbbbbbbbbbO....", ".....OObbbbbbbbbbOO.....",
+  ".....ObbO......ObbO.....", ".....ObbO......ObbO.....", ".....OOOO......OOOO.....",
+];
+
+const ANCHORS = {
+  leftEar: {x:3, y:3}, rightEar: {x:16, y:3},
+  leftEye: {x:6, y:9}, rightEye: {x:13, y:9},
+  mouth: {x:12, y:14}, horn: {x:11, y:2},
+  chest: {x:5, y:17, w:14, h:3},
+};
+
+function charToColor(ch) {
+  if (ch === 'b') return COLOR.BODY;
+  if (ch === 'L') return COLOR.BODY_LITE;
+  if (ch === 'S') return COLOR.BODY_SHADE;
+  if (ch === 'O') return COLOR.OUTLINE;
+  return null;
+}
+
+function drawSilhouette(g) {
+  for (let y = 0; y < GRID; y++) {
+    const row = SILHOUETTE[y] || '';
+    for (let x = 0; x < GRID; x++) {
+      const c = charToColor(row.charAt(x));
+      if (c !== null) setPx(g, x, y, c);
+    }
+  }
+}
+
+// --- Generic shape drawer ---
+function drawShape(g, x0, y0, rows, colorMap) {
+  for (let dy = 0; dy < rows.length; dy++) {
+    const row = rows[dy];
+    for (let dx = 0; dx < row.length; dx++) {
+      const ch = row.charAt(dx);
+      if (colorMap[ch] !== undefined) setPx(g, x0 + dx, y0 + dy, colorMap[ch]);
+    }
+  }
+}
+
+const EAR_MAP = {b:COLOR.BODY, E:COLOR.EARS, D:COLOR.EARS_DEEP, O:COLOR.OUTLINE, L:COLOR.BODY_LITE};
+const EYE_MAP = {W:COLOR.EYE_WHITE, K:COLOR.PUPIL, O:COLOR.OUTLINE, A:COLOR.ACCENT};
+const MOUTH_MAP = {M:COLOR.MOUTH, p:COLOR.PUPIL, P:COLOR.MOUTH};
+const HORN_MAP = {O:COLOR.OUTLINE, E:COLOR.EARS, A:COLOR.ACCENT};
+
+// --- Ears (5) ---
+const EARS = [
+  function earRound(g) {
+    const L=ANCHORS.leftEar, R=ANCHORS.rightEar;
+    drawShape(g,L.x,L.y,[".OOO.","ObbbO","ObEbO","OObOO"],EAR_MAP);
+    drawShape(g,R.x,R.y,[".OOO.","ObbbO","ObEbO","OObOO"],EAR_MAP);
+  },
+  function earCat(g) {
+    const L=ANCHORS.leftEar, R=ANCHORS.rightEar;
+    drawShape(g,L.x,L.y-1,["..O..",".OEO.","ObEbO","ObEbO","OObOO"],EAR_MAP);
+    drawShape(g,R.x,R.y-1,["..O..",".OEO.","ObEbO","ObEbO","OObOO"],EAR_MAP);
+  },
+  function earFloppy(g) {
+    const L=ANCHORS.leftEar, R=ANCHORS.rightEar;
+    drawShape(g,L.x-1,L.y,[".OOO.","ObbbO","ObEbO",".ObO.",".OOO."],EAR_MAP);
+    drawShape(g,R.x+1,R.y,[".OOO.","ObbbO","ObEbO",".ObO.",".OOO."],EAR_MAP);
+  },
+  function earLeaf(g) {
+    const L=ANCHORS.leftEar, R=ANCHORS.rightEar;
+    drawShape(g,L.x,L.y-1,["..O..",".OEO.","OEEbO","ObEbO","OObOO"],EAR_MAP);
+    drawShape(g,R.x,R.y-1,["..O..",".OEO.","ObEEO","ObEbO","OObOO"],EAR_MAP);
+  },
+  function earStub(g) {
+    const L=ANCHORS.leftEar, R=ANCHORS.rightEar;
+    drawShape(g,L.x+1,L.y+1,["OOO","ObO","OOO"],EAR_MAP);
+    drawShape(g,R.x+1,R.y+1,["OOO","ObO","OOO"],EAR_MAP);
+  },
+];
+
+// --- Eyes (8) ---
+function eyeStandardMood(g, mood, frame) {
+  const L=ANCHORS.leftEye, R=ANCHORS.rightEye;
+  if (mood === 'dead') {
+    drawShape(g,L.x,L.y,["K..K",".KK.","K..K"],EYE_MAP);
+    drawShape(g,R.x,R.y,["K..K",".KK.","K..K"],EYE_MAP);
+    return true;
+  }
+  if (mood === 'sleeping') {
+    drawShape(g,L.x,L.y,["....","KKKK","...."],EYE_MAP);
+    drawShape(g,R.x,R.y,["....","KKKK","...."],EYE_MAP);
+    return true;
+  }
+  if ((frame % 40) < 2 && mood !== 'happy') {
+    drawShape(g,L.x,L.y,["....","KKKK","...."],EYE_MAP);
+    drawShape(g,R.x,R.y,["....","KKKK","...."],EYE_MAP);
+    return true;
+  }
+  return false;
+}
+
+const EYES = [
+  function(g,mood,frame) { if(eyeStandardMood(g,mood,frame))return; const L=ANCHORS.leftEye,R=ANCHORS.rightEye; drawShape(g,L.x,L.y,["WWWW","WKKW","WWWW"],EYE_MAP); drawShape(g,R.x,R.y,["WWWW","WKKW","WWWW"],EYE_MAP); },
+  function(g,mood,frame) { if(eyeStandardMood(g,mood,frame))return; const L=ANCHORS.leftEye,R=ANCHORS.rightEye; drawShape(g,L.x,L.y,["WWWW","WKKW","WWWW"],EYE_MAP); drawShape(g,R.x,R.y,["WWWW","WKKW","WWWW"],EYE_MAP); setPx(g,L.x+1,L.y,COLOR.BODY_LITE); setPx(g,R.x+1,R.y,COLOR.BODY_LITE); },
+  function(g,mood,frame) { if(eyeStandardMood(g,mood,frame))return; const L=ANCHORS.leftEye,R=ANCHORS.rightEye; drawShape(g,L.x,L.y-1,["WWWW","WKKW","WKKW","WWWW"],EYE_MAP); drawShape(g,R.x,R.y-1,["WWWW","WKKW","WKKW","WWWW"],EYE_MAP); },
+  function(g,mood,frame) { if(eyeStandardMood(g,mood,frame))return; const L=ANCHORS.leftEye,R=ANCHORS.rightEye; drawShape(g,L.x,L.y,["OOOO","WKKW","OOOO"],EYE_MAP); drawShape(g,R.x,R.y,["OOOO","WKKW","OOOO"],EYE_MAP); },
+  function(g,mood,frame) { if(eyeStandardMood(g,mood,frame))return; const L=ANCHORS.leftEye,R=ANCHORS.rightEye; drawShape(g,L.x,L.y,["WWWW","WWKW","WWWW"],EYE_MAP); drawShape(g,R.x,R.y,["WWWW","WKWW","WWWW"],EYE_MAP); },
+  function(g,mood,frame) { if(eyeStandardMood(g,mood,frame))return; const L=ANCHORS.leftEye,R=ANCHORS.rightEye; drawShape(g,L.x,L.y,["AKKA","KKKK","AKKA"],EYE_MAP); drawShape(g,R.x,R.y,["AKKA","KKKK","AKKA"],EYE_MAP); },
+  function(g,mood,frame) { if(eyeStandardMood(g,mood,frame))return; const L=ANCHORS.leftEye,R=ANCHORS.rightEye; drawShape(g,L.x,L.y,["....","KKKK","...."],EYE_MAP); drawShape(g,R.x,R.y,["WWWW","WKKW","WWWW"],EYE_MAP); },
+  function(g,mood,frame) { if(eyeStandardMood(g,mood,frame))return; const L=ANCHORS.leftEye,R=ANCHORS.rightEye; drawShape(g,L.x,L.y+1,["KKKK"],EYE_MAP); drawShape(g,R.x,R.y+1,["KKKK"],EYE_MAP); },
+];
+
+// --- Mouths (6) ---
+function mouthOverride(g, mood) {
+  const A=ANCHORS.mouth;
+  if (mood==='skeptical') { drawShape(g,A.x-1,A.y+1,[".MM.","M..M"],MOUTH_MAP); return true; }
+  if (mood==='dead') { drawShape(g,A.x-1,A.y+1,["MMMM"],MOUTH_MAP); return true; }
+  if (mood==='sleeping') { drawShape(g,A.x-1,A.y,["..MM",".MM."],MOUTH_MAP); return true; }
+  return false;
+}
+
+const MOUTHS = [
+  function(g,mood,frame) { if(mouthOverride(g,mood))return; const A=ANCHORS.mouth; drawShape(g,A.x-1,A.y,["M..M",".MM."],MOUTH_MAP); },
+  function(g,mood,frame) { if(mouthOverride(g,mood))return; const A=ANCHORS.mouth; const open=(frame%16)<8; if(open) drawShape(g,A.x-1,A.y,[".MM.","MppM",".MM."],MOUTH_MAP); else drawShape(g,A.x-1,A.y,["MMMM","...."],MOUTH_MAP); },
+  function(g,mood,frame) { if(mouthOverride(g,mood))return; const A=ANCHORS.mouth; drawShape(g,A.x-1,A.y,[".MM.","MppM",".MM."],MOUTH_MAP); },
+  function(g,mood,frame) { if(mouthOverride(g,mood))return; const A=ANCHORS.mouth; drawShape(g,A.x-1,A.y+1,["MMMM"],MOUTH_MAP); },
+  function(g,mood,frame) { if(mouthOverride(g,mood))return; const A=ANCHORS.mouth; drawShape(g,A.x-2,A.y,["MMMMMM","MpppPM",".MMMM."],MOUTH_MAP); },
+  function(g,mood,frame) { if(mouthOverride(g,mood))return; const A=ANCHORS.mouth; drawShape(g,A.x-1,A.y,["M..M",".MM."],MOUTH_MAP); setPx(g,A.x,A.y+1,COLOR.EYE_WHITE); },
+];
+
+// --- Horns (6) ---
+const HORNS = [
+  function(g) { const A=ANCHORS.horn; for(let dy=0;dy<3;dy++) setPx(g,A.x,dy,COLOR.OUTLINE); setPx(g,A.x-1,0,COLOR.OUTLINE); setPx(g,A.x+1,0,COLOR.OUTLINE); setPx(g,A.x,0,COLOR.ACCENT); },
+  function(g) { drawShape(g,ANCHORS.horn.x-1,0,["OEO","OEEO","OOOO"],HORN_MAP); },
+  function(g) { const A=ANCHORS.horn; for(let dy=0;dy<3;dy++){setPx(g,A.x-2,dy,COLOR.OUTLINE);setPx(g,A.x+2,dy,COLOR.OUTLINE);} setPx(g,A.x-2,0,COLOR.ACCENT); setPx(g,A.x+2,0,COLOR.ACCENT); },
+  function(g) { drawShape(g,ANCHORS.horn.x-1,0,[".A.","AEA","OEO","OOOO"],HORN_MAP); },
+  function(g) { drawShape(g,ANCHORS.horn.x,0,["O","O","OO"],HORN_MAP); },
+  function(g) { /* none */ },
+];
+
+// --- Chest (6) ---
+function paintBody(g, x, y, c) {
+  const cur = getPx(g, x, y);
+  if (cur === COLOR.BODY || cur === COLOR.BODY_SHADE || cur === COLOR.BODY_LITE) setPx(g, x, y, c);
+}
+
+const CHEST = [
+  function(g) { const A=ANCHORS.chest; for(let dx=0;dx<A.w;dx++){paintBody(g,A.x+dx,A.y,COLOR.SASH_SHADE);paintBody(g,A.x+dx,A.y+1,COLOR.SASH);paintBody(g,A.x+dx,A.y+2,COLOR.SASH_SHADE);} },
+  function(g) { const A=ANCHORS.chest; for(let dx=0;dx<A.w;dx++){if(Math.floor(dx/2)%2===0){paintBody(g,A.x+dx,A.y,COLOR.SASH_SHADE);paintBody(g,A.x+dx,A.y+1,COLOR.SASH);paintBody(g,A.x+dx,A.y+2,COLOR.SASH_SHADE);}} },
+  function(g) { const A=ANCHORS.chest; const cx=A.x+Math.floor(A.w/2)-2; paintBody(g,cx,A.y,COLOR.SASH);paintBody(g,cx+3,A.y,COLOR.SASH);paintBody(g,cx,A.y+1,COLOR.SASH);paintBody(g,cx+1,A.y+1,COLOR.SASH_SHADE);paintBody(g,cx+2,A.y+1,COLOR.SASH_SHADE);paintBody(g,cx+3,A.y+1,COLOR.SASH);paintBody(g,cx,A.y+2,COLOR.SASH);paintBody(g,cx+3,A.y+2,COLOR.SASH); },
+  function(g) { const A=ANCHORS.chest; const cx=A.x+Math.floor(A.w/2)-1; paintBody(g,cx,A.y,COLOR.SASH);paintBody(g,cx+1,A.y,COLOR.SASH);paintBody(g,cx,A.y+1,COLOR.SASH_SHADE);paintBody(g,cx+1,A.y+1,COLOR.SASH_SHADE); },
+  function(g) { const A=ANCHORS.chest; for(let dx=1;dx<A.w-1;dx++) paintBody(g,A.x+dx,A.y,COLOR.SASH); paintBody(g,A.x+2,A.y+1,COLOR.SASH_SHADE); paintBody(g,A.x+A.w-3,A.y+1,COLOR.SASH_SHADE); },
+  function(g) { /* bare */ },
+];
+
+// --- Effect layer ---
+function applyEffects(g, mood, frame) {
+  if (mood === 'working') {
+    const slow = Math.floor(frame/3) % 4;
+    drawSparkle(g, 0, 5, slow);
+    drawSparkle(g, 22, 5, (slow+2)%4);
+  }
+  if (mood === 'talking') {
+    const phase = Math.floor(frame/2) % 10;
+    if (phase < 7) setPx(g, 21, 8, COLOR.PUPIL);
+    if (phase >= 2 && phase < 7) setPx(g, 22, 6, COLOR.PUPIL);
+    if (phase >= 4 && phase < 7) setPx(g, 23, 4, COLOR.PUPIL);
+  }
+  if (mood === 'happy') {
+    const phase = Math.floor(frame/3) % 4;
+    if (phase===0||phase===2) { drawStar(g,1,4); drawStar(g,22,4); }
+    if (phase===1||phase===3) { drawStar(g,2,7); drawStar(g,21,7); }
+  }
+  if (mood === 'skeptical') {
+    if (Math.floor(frame/4)%3 < 2) { setPx(g,19,6,COLOR.SASH);setPx(g,20,7,COLOR.SASH);setPx(g,19,7,COLOR.SASH);setPx(g,19,8,COLOR.SASH); }
+  }
+  if (mood === 'sleeping') {
+    const phase=Math.floor(frame/4)%5; const dx=16+phase,dy=5-phase;
+    if(dy>=0&&dy<6){setPx(g,dx,dy,COLOR.OUTLINE);setPx(g,dx+1,dy,COLOR.OUTLINE);setPx(g,dx+2,dy,COLOR.OUTLINE);setPx(g,dx+1,dy+1,COLOR.OUTLINE);setPx(g,dx,dy+2,COLOR.OUTLINE);setPx(g,dx+1,dy+2,COLOR.OUTLINE);setPx(g,dx+2,dy+2,COLOR.OUTLINE);}
+  }
+  if (mood === 'dead') {
+    for(let x=9;x<=14;x++) setPx(g,x,0,COLOR.ACCENT);
+    setPx(g,8,1,COLOR.ACCENT); setPx(g,15,1,COLOR.ACCENT);
+  }
+}
+
+function drawSparkle(g, x, y, phase) {
+  if(phase===0){setPx(g,x+1,y,COLOR.ACCENT);setPx(g,x,y+1,COLOR.ACCENT);setPx(g,x+2,y+1,COLOR.ACCENT);setPx(g,x+1,y+2,COLOR.ACCENT);}
+  else if(phase===1){setPx(g,x,y,COLOR.ACCENT);setPx(g,x+2,y,COLOR.ACCENT);setPx(g,x+1,y+1,COLOR.ACCENT);setPx(g,x,y+2,COLOR.ACCENT);setPx(g,x+2,y+2,COLOR.ACCENT);}
+  else if(phase===2){setPx(g,x+1,y+1,COLOR.ACCENT);}
+}
+function drawStar(g, x, y) {
+  setPx(g,x+1,y,COLOR.ACCENT);setPx(g,x,y+1,COLOR.ACCENT);setPx(g,x+1,y+1,COLOR.ACCENT);setPx(g,x+2,y+1,COLOR.ACCENT);setPx(g,x+1,y+2,COLOR.ACCENT);
+}
+
+// --- Talking mouth override ---
+function drawTalkingMouth(g, frame) {
+  const A = ANCHORS.mouth;
+  const phase = Math.floor(frame/3) % 4;
+  if (phase===0) { setPx(g,A.x-1,A.y+1,COLOR.MOUTH);setPx(g,A.x,A.y+1,COLOR.MOUTH);setPx(g,A.x+1,A.y+1,COLOR.MOUTH); }
+  else if (phase===1) { setPx(g,A.x-1,A.y,COLOR.MOUTH);setPx(g,A.x,A.y,COLOR.PUPIL);setPx(g,A.x+1,A.y,COLOR.MOUTH);setPx(g,A.x-1,A.y+1,COLOR.MOUTH);setPx(g,A.x,A.y+1,COLOR.MOUTH);setPx(g,A.x+1,A.y+1,COLOR.MOUTH); }
+  else if (phase===2) { setPx(g,A.x-1,A.y,COLOR.MOUTH);setPx(g,A.x,A.y,COLOR.PUPIL);setPx(g,A.x+1,A.y,COLOR.MOUTH);setPx(g,A.x-1,A.y+1,COLOR.MOUTH);setPx(g,A.x,A.y+1,COLOR.PUPIL);setPx(g,A.x+1,A.y+1,COLOR.MOUTH);setPx(g,A.x-1,A.y+2,COLOR.MOUTH);setPx(g,A.x,A.y+2,COLOR.MOUTH);setPx(g,A.x+1,A.y+2,COLOR.MOUTH); }
+  else { setPx(g,A.x-1,A.y+1,COLOR.MOUTH);setPx(g,A.x,A.y+1,COLOR.MOUTH);setPx(g,A.x+1,A.y+1,COLOR.MOUTH); }
+}
+
+// --- Compose grid ---
+function composeGrid(spec, mood, frame) {
+  const g = emptyGrid();
+  HORNS[spec.horn % HORNS.length](g);
+  drawSilhouette(g);
+  EARS[spec.ears % EARS.length](g);
+  CHEST[spec.chest % CHEST.length](g);
+  EYES[spec.eyes % EYES.length](g, mood, frame);
+  if (mood === 'talking') drawTalkingMouth(g, frame);
+  else MOUTHS[spec.mouth % MOUTHS.length](g, mood, frame);
+  applyEffects(g, mood, frame);
+  return g;
+}
+
+// --- Generate thronglet spec from name ---
+const TRAITS = ['curious','sleepy','eager','chaotic','calm','skeptical'];
+
+const DISPATCHER_SPEC = { name:'Orix', seed:0, palette:'dusk', ears:1, eyes:1, mouth:0, horn:2, chest:0, trait:'calm' };
+
+function generateThronglet(seed) {
+  if (seed === '_dispatcher' || seed === 'dispatcher') return DISPATCHER_SPEC;
+  const h = hash32(seed);
+  return {
+    name: pickName(h),
+    seed: h,
+    palette: PALETTE_NAMES[pickIdx(h>>>0, PALETTE_NAMES.length)],
+    ears: pickIdx(h>>>3, EARS.length),
+    eyes: pickIdx(h>>>7, EYES.length),
+    mouth: pickIdx(h>>>11, MOUTHS.length),
+    horn: pickIdx(h>>>17, HORNS.length),
+    chest: pickIdx(h>>>23, CHEST.length),
+    trait: TRAITS[pickIdx(h>>>29, TRAITS.length)],
+  };
+}
+
+// ============================================================
+// CANVAS RENDERER
+// ============================================================
+
+function colorFor(idx, palette) {
+  switch(idx) {
+    case COLOR.BODY: return palette.body;
+    case COLOR.BODY_SHADE: return palette.bodyShade;
+    case COLOR.BODY_LITE: return palette.bodyLite;
+    case COLOR.EARS: return palette.ears;
+    case COLOR.EARS_DEEP: return palette.earsDeep;
+    case COLOR.EYE_WHITE: return palette.eyeWhite;
+    case COLOR.PUPIL: return palette.pupil;
+    case COLOR.MOUTH: return palette.mouth;
+    case COLOR.SASH: return palette.sash;
+    case COLOR.SASH_SHADE: return palette.sashShade;
+    case COLOR.OUTLINE: return palette.outline;
+    case COLOR.ACCENT: return palette.accent;
+    default: return null;
+  }
+}
+
+function renderThrongletToCanvas(ctx, grid, palette, x, y, size) {
+  const cell = size / GRID;
+  for (let i = 0; i < GRID * GRID; i++) {
+    if (grid[i] === 0) continue;
+    const fill = colorFor(grid[i], palette);
+    if (!fill) continue;
+    const px = i % GRID, py = (i - px) / GRID;
+    ctx.fillStyle = fill;
+    ctx.fillRect(x + px * cell, y + py * cell, cell + 0.5, cell + 0.5);
+  }
+}
+
+// ============================================================
+// GAME LOGIC
+// ============================================================
+
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const tip = document.getElementById('tip');
+let W, H, bgCanvas = null;
+function resize() { W = cv.width = innerWidth; H = cv.height = innerHeight; bgCanvas = null; }
+resize(); addEventListener('resize', resize);
+
+let tool = 'feed', fed = 0, chats = 0, mx = -999, my = -999, md = false;
+
+// Day/night cycle (full cycle = 120s)
+let dayTime = 0.35; // start at morning
+const DAY_SPEED = 1 / 120;
+const SKY_PHASES = [
+  {t:0,   r:10,g:22,b:40,  stars:0.7, ambient:0.3, overlay:'rgba(5,10,30,.45)'},
+  {t:0.2, r:26,g:40,b:72,  stars:0.3, ambient:0.5, overlay:'rgba(10,15,40,.3)'},
+  {t:0.3, r:58,g:74,b:96,  stars:0,   ambient:0.7, overlay:'rgba(60,40,30,.15)'},
+  {t:0.4, r:42,g:74,b:24,  stars:0,   ambient:1.0, overlay:'rgba(0,0,0,0)'},
+  {t:0.6, r:42,g:74,b:24,  stars:0,   ambient:1.0, overlay:'rgba(0,0,0,0)'},
+  {t:0.75,r:56,g:80,b:32,  stars:0,   ambient:0.95,overlay:'rgba(30,15,0,.08)'},
+  {t:0.82,r:90,g:56,b:40,  stars:0,   ambient:0.7, overlay:'rgba(60,20,10,.18)'},
+  {t:0.9, r:26,g:32,b:64,  stars:0.5, ambient:0.4, overlay:'rgba(10,10,40,.35)'},
+  {t:1.0, r:10,g:22,b:40,  stars:0.7, ambient:0.3, overlay:'rgba(5,10,30,.45)'},
+];
+
+function getSkyState(t) {
+  t = ((t % 1) + 1) % 1;
+  let i = 0;
+  for (let j = 1; j < SKY_PHASES.length; j++) { if (SKY_PHASES[j].t > t) { i = j - 1; break; } }
+  const a = SKY_PHASES[i], b = SKY_PHASES[Math.min(i + 1, SKY_PHASES.length - 1)];
+  const f = (t - a.t) / (b.t - a.t || 1);
+  return {
+    stars: a.stars + (b.stars - a.stars) * f,
+    ambient: a.ambient + (b.ambient - a.ambient) * f,
+    overlay: a.overlay,
+    overlayAlpha: f,
+    overlayA: a.overlay,
+    overlayB: b.overlay,
+  };
+}
+
+// Stars (seeded positions)
+let stars = [];
+function initStars() { const rng = mulberry32(77); for (let i = 0; i < 60; i++) stars.push({x: rng() * 2000, y: rng() * 1200, sz: 0.5 + rng() * 1.5, twinkle: rng() * 6.28}); }
+
+function drawStars(alpha, dt) {
+  if (alpha < 0.02) return;
+  ctx.fillStyle = `rgba(255,255,240,${alpha.toFixed(3)})`;
+  for (const s of stars) {
+    s.twinkle += dt * 2;
+    const a = alpha * (0.5 + 0.5 * Math.sin(s.twinkle));
+    if (a < 0.03) continue;
+    ctx.globalAlpha = a;
+    ctx.fillRect(s.x % W, s.y % H, s.sz, s.sz);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawSkyOverlay(sky) {
+  const a = sky.ambient;
+  if (a >= 0.98) return;
+  const darkness = 1 - a;
+  ctx.fillStyle = `rgba(8,12,28,${(darkness * 0.55).toFixed(3)})`;
+  ctx.fillRect(0, 0, W, H);
+  if (sky.ambient < 0.75 && sky.ambient > 0.4) {
+    const sunset = Math.max(0, 1 - Math.abs(sky.ambient - 0.6) / 0.2);
+    if (sunset > 0.05) {
+      ctx.fillStyle = `rgba(120,50,20,${(sunset * 0.12).toFixed(3)})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+  }
+}
+
+// Toast notification system
+let toasts = [];
+function toast(msg, color) {
+  color = color || '#b8d8a0';
+  toasts.push({msg, color, life: 3.5});
+  if (toasts.length > 5) toasts.shift();
+}
+function updateToasts(dt) { toasts = toasts.filter(t => { t.life -= dt; return t.life > 0; }); }
+function drawToasts() {
+  if (!toasts.length) return;
+  const baseX = W - 230, startY = 55;
+  ctx.textAlign = 'left';
+  for (let i = 0; i < toasts.length; i++) {
+    const t = toasts[i];
+    const alpha = Math.min(1, t.life * 2) * Math.min(1, (3.5 - t.life + 0.01) * 4);
+    const y = startY + i * 30;
+    ctx.globalAlpha = alpha * 0.92;
+    ctx.fillStyle = 'rgba(10,20,5,.9)';
+    roundRect(ctx, baseX, y, 215, 24, 5); ctx.fill();
+    ctx.strokeStyle = 'rgba(100,160,60,.2)'; ctx.lineWidth = 1;
+    roundRect(ctx, baseX, y, 215, 24, 5); ctx.stroke();
+    ctx.fillStyle = t.color; ctx.font = '11px monospace';
+    ctx.fillText(t.msg, baseX + 8, y + 16);
+    ctx.globalAlpha = 1;
+  }
+  ctx.textAlign = 'center';
+}
+
+// Task labels for working agents
+const TASKS = [
+  'fixing auth flow','shipping v2.1','refactoring DB','writing tests',
+  'code review PR #42','migrating ESM','optimizing queries','debugging CI',
+  'adding dark mode','updating deps','resolving conflicts','benchmarking',
+  'PR feedback','type safety','fixing flaky test','edge case fix'
+];
+
+function setTool(t) { tool = t; updBtn(); }
+function updBtn() { document.querySelectorAll('#tools button').forEach((b, i) => {
+  if (i < 5) b.className = ['feed','pet','poke','spawn','inspect'][i] === tool ? 'on' : '';
+}); }
+
+const TIME_SPEEDS = [1, 4, 10, 0.25];
+let timeSpeedIdx = 0;
+function cycleTimeSpeed() {
+  timeSpeedIdx = (timeSpeedIdx + 1) % TIME_SPEEDS.length;
+  const s = TIME_SPEEDS[timeSpeedIdx];
+  document.getElementById('time-btn').innerHTML = `⏩ ${s}×<span class="key">T</span>`;
+}
+
+addEventListener('keydown', e => {
+  if (e.key >= '1' && e.key <= '5') setTool(['feed','pet','poke','spawn','inspect'][e.key - 1]);
+  if (e.key === 't' || e.key === 'T') cycleTimeSpeed();
+});
+
+// --- Background ---
+function makeBg() {
+  bgCanvas = document.createElement('canvas'); bgCanvas.width = W; bgCanvas.height = H;
+  const g = bgCanvas.getContext('2d');
+  const skyGrad = g.createLinearGradient(0, 0, 0, H);
+  skyGrad.addColorStop(0, '#2a4a18'); skyGrad.addColorStop(0.3, '#3a6522'); skyGrad.addColorStop(1, '#2d5518');
+  g.fillStyle = skyGrad; g.fillRect(0, 0, W, H);
+
+  const tileW = 24, tileH = 12;
+  const greens = ['#3d7020','#4a8028','#3a6b22','#448025','#356518','#3e7523','#45792a','#3b6e1f'];
+  for (let row = 0; row < H / tileH + 2; row++) {
+    for (let col = -1; col < W / tileW + 2; col++) {
+      const ox = (row % 2) * (tileW / 2);
+      const x = col * tileW + ox, y = row * tileH;
+      g.fillStyle = greens[(col * 7 + row * 13 + col * row) & 7];
+      g.beginPath(); g.moveTo(x, y + tileH / 2); g.lineTo(x + tileW / 2, y); g.lineTo(x + tileW, y + tileH / 2); g.lineTo(x + tileW / 2, y + tileH); g.closePath(); g.fill();
+    }
+  }
+
+  const rng = mulberry32(42);
+  for (let i = 0; i < 80; i++) { const gx = rng()*W, gy = rng()*H; g.fillStyle = `rgba(80,160,40,${0.15+rng()*0.15})`; g.fillRect(gx, gy, 2, 4); g.fillRect(gx + 3, gy + 1, 2, 3); }
+
+  const flowerCols = ['#e8d058','#d87898','#a8c8e0','#e0a0d0'];
+  for (let i = 0; i < 30; i++) { const fx = rng()*W, fy = rng()*H; g.fillStyle = flowerCols[i % 4]; g.fillRect(fx, fy, 3, 3); g.fillStyle = '#4a8028'; g.fillRect(fx + 1, fy + 3, 1, 3); }
+
+  const trees = [];
+  for (let i = 0; i < 12; i++) {
+    let tx, ty;
+    if (i < 4) { tx = 20 + rng() * 80; ty = 40 + rng() * (H - 100); }
+    else if (i < 8) { tx = W - 20 - rng() * 80; ty = 40 + rng() * (H - 100); }
+    else { tx = 100 + rng() * (W - 200); ty = rng() < 0.5 ? 20 + rng() * 60 : H - 60 - rng() * 60; }
+    trees.push({x: tx, y: ty, s: 90 + rng() * 50});
+  }
+  trees.sort((a, b) => a.y - b.y);
+
+  for (const t of trees) {
+    g.fillStyle = 'rgba(0,0,0,.12)'; g.beginPath(); g.ellipse(t.x, t.y + t.s * .35, t.s * .2, t.s * .06, 0, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#3d2815'; g.fillRect(t.x - 5, t.y - t.s * .05, 10, t.s * .4);
+    g.fillStyle = '#4a3520'; g.fillRect(t.x - 3, t.y - t.s * .05, 6, t.s * .4);
+    const cols = ['#1a5510','#236818','#2d7a1e','#389026'];
+    for (let j = 0; j < 4; j++) { g.fillStyle = cols[j]; g.beginPath(); g.arc(t.x + (j % 2 ? -1 : 1) * t.s * .06, t.y - t.s * (.1 + .12 * j), t.s * (.45 - .08 * j), 0, Math.PI * 2); g.fill(); }
+    g.fillStyle = 'rgba(100,200,50,.08)'; g.beginPath(); g.arc(t.x - t.s * .1, t.y - t.s * .4, t.s * .2, 0, Math.PI * 2); g.fill();
+  }
+
+  g.strokeStyle = '#5a4020'; g.lineWidth = 3;
+  const pad = 50; roundRect(g, pad, pad, W - pad * 2, H - pad * 2, 12); g.stroke();
+  g.fillStyle = '#6a5030';
+  for (let x = pad; x <= W - pad; x += 60) { g.fillRect(x - 3, pad - 6, 6, 14); g.fillRect(x - 3, H - pad - 6, 6, 14); }
+  for (let y = pad; y <= H - pad; y += 60) { g.fillRect(pad - 6, y - 3, 14, 6); g.fillRect(W - pad - 6, y - 3, 14, 6); }
+  g.strokeStyle = 'rgba(100,80,40,.3)'; g.lineWidth = 1;
+  roundRect(g, pad + 2, pad + 2, W - pad * 2 - 4, H - pad * 2 - 4, 11); g.stroke();
+}
+
+function mulberry32(a) { return function() { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t ^= t + Math.imul(t ^ t >>> 7, 61 | t); return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+
+// --- Status mapping ---
+function statusToMood(status, moodOverride) {
+  if (moodOverride === 1) return 'happy';
+  if (moodOverride === 2) return 'skeptical';
+  if (status === 'working') return 'working';
+  if (status === 'sleeping') return 'sleeping';
+  if (status === 'dead') return 'dead';
+  if (status === 'talking') return 'talking';
+  return 'idle';
+}
+
+// --- Bot class ---
+const STATUSES = ['working','waiting','sleeping','dead'];
+const STATUS_COLORS = {working:'#f0c040', waiting:'#60b070', sleeping:'#607090', dead:'#a04040'};
+const TALK_IDLE = ['...','💭','🤔','hmm'];
+const TALK_WORK = ['fixing...','shipping','testing','merging','LGTM!','review?','done✓','refactor','debugging'];
+
+let bots = [];
+
+class Bot {
+  constructor(x, y, opts = {}) {
+    this.x = x || 80 + Math.random() * (W - 160);
+    this.y = y || 80 + Math.random() * (H - 160);
+    this.vx = 0; this.vy = 0;
+    this.spec = opts.spec || generateThronglet(opts.name || `agent-${Date.now()}-${Math.random()}`);
+    this.name = this.spec.name;
+    this.status = opts.status || STATUSES[Math.random() < .3 ? 0 : Math.random() < .5 ? 1 : 2];
+    this.ang = Math.random() * 6.28;
+    this.timer = 30 + Math.random() * 60;
+    this.mood = 0; // 0=normal, 1=happy, 2=startled
+    this.moodT = 0;
+    this.frame = Math.floor(Math.random() * 600);
+    this.blink = 0; this.blinkT = 60 + Math.random() * 100;
+    this.msg = ''; this.msgT = 0;
+    this.sz = 72; // render size in pixels
+    this.palette = PALETTES[this.spec.palette];
+    this.facing = 1;
+    this.talkTimer = 0;
+    this.task = this.status === 'working' ? TASKS[Math.random() * TASKS.length | 0] : '';
+    this.prevStatus = this.status;
+  }
+
+  update(dt) {
+    this.frame = (this.frame + 1) % 600;
+    this.timer -= dt * 60;
+
+    if (this.timer < 0) {
+      this.ang += (Math.random() - .5) * 1.5;
+      this.timer = 30 + Math.random() * 60;
+      if (Math.random() < .02) {
+        const r = Math.random();
+        const newStatus = r < .3 ? 'working' : r < .7 ? 'waiting' : 'sleeping';
+        if (newStatus !== this.status) {
+          toast(`${this.name} → ${newStatus}`, STATUS_COLORS[newStatus]);
+          if (newStatus === 'working') this.task = TASKS[Math.random() * TASKS.length | 0];
+          else this.task = '';
+        }
+        this.status = newStatus;
+      }
+      if (Math.random() < .06) {
+        this.msg = this.status === 'working' ? TALK_WORK[Math.random() * TALK_WORK.length | 0] : TALK_IDLE[Math.random() * TALK_IDLE.length | 0];
+        this.msgT = 90;
+        this.talkTimer = 30;
+        chats++;
+      }
+    }
+
+    let spd;
+    if (this.status === 'sleeping' || this.status === 'dead') spd = 0;
+    else if (this.mood === 2) spd = 3.5;
+    else if (this.mood === 1) spd = 1.2;
+    else if (this.status === 'working') spd = 0.15;
+    else spd = 0.4;
+
+    let tx = Math.cos(this.ang) * spd, ty = Math.sin(this.ang) * spd * .6;
+    for (const o of bots) {
+      if (o === this) continue;
+      const dx = o.x - this.x, dy = o.y - this.y, d = Math.hypot(dx, dy);
+      if (d < 130 && d > 50) { tx += dx / d * .12; ty += dy / d * .12; }
+      else if (d < 50 && d > 1) { tx -= dx / d * .3; ty -= dy / d * .3; }
+    }
+
+    if (spd > 0) {
+      this.vx += (tx - this.vx) * .04; this.vy += (ty - this.vy) * .04;
+      this.x += this.vx * dt * 60; this.y += this.vy * dt * 60;
+      if (Math.abs(this.vx) > .05) this.facing = this.vx > 0 ? 1 : -1;
+    } else { this.vx *= .9; this.vy *= .9; }
+
+    const pad = 70;
+    if (this.x < pad) { this.x = pad; this.ang = Math.random() * Math.PI - .5; }
+    if (this.x > W - pad) { this.x = W - pad; this.ang = Math.PI + (Math.random() - .5); }
+    if (this.y < pad) { this.y = pad; this.ang = Math.PI * .5; }
+    if (this.y > H - pad) { this.y = H - pad; this.ang = -Math.PI * .5; }
+
+    if (this.moodT > 0) { this.moodT -= dt * 60; if (this.moodT < 0) this.mood = 0; }
+    if (this.msgT > 0) { this.msgT -= dt * 60; if (this.msgT < 0) this.msg = ''; }
+    if (this.talkTimer > 0) this.talkTimer -= dt * 60;
+  }
+
+  getMood() {
+    if (this.mood === 1) return 'happy';
+    if (this.mood === 2) return 'skeptical';
+    if (this.talkTimer > 0) return 'talking';
+    if (this.status === 'working') return 'working';
+    if (this.status === 'sleeping') return 'sleeping';
+    if (this.status === 'dead') return 'dead';
+    return 'idle';
+  }
+
+  draw() {
+    const mood = this.getMood();
+    const grid = composeGrid(this.spec, mood, this.frame);
+
+    // Mood-driven bob/transform
+    let bobY = 0, tilt = 0;
+    if (mood === 'working') { bobY = -Math.abs(Math.sin(this.frame * 0.07)) * 3; tilt = Math.sin(this.frame * 0.14) * 0.03; }
+    else if (mood === 'happy') { bobY = -Math.abs(Math.sin(this.frame * 0.06)) * 6; }
+    else if (mood === 'talking') { bobY = Math.sin(this.frame * 0.035) * 2; tilt = Math.sin(this.frame * 0.035) * 0.04; }
+    else if (mood === 'idle') { bobY = Math.sin(this.frame * 0.012) * 1; }
+    else if (mood === 'sleeping') { bobY = Math.sin(this.frame * 0.008) * 1.5; tilt = 0.05; }
+
+    const sz = this.sz;
+    const px = Math.round(this.x - sz / 2), py = Math.round(this.y - sz / 2 + bobY);
+
+    ctx.save();
+
+    if (tilt !== 0) {
+      ctx.translate(this.x, this.y + bobY);
+      ctx.rotate(tilt);
+      ctx.translate(-this.x, -(this.y + bobY));
+    }
+
+    if (mood === 'dead') ctx.globalAlpha = 0.55;
+
+    // Shadow
+    ctx.fillStyle = 'rgba(0,0,0,.18)';
+    ctx.beginPath(); ctx.ellipse(this.x, this.y + sz * .42, sz * .25, sz * .06, 0, 0, Math.PI * 2); ctx.fill();
+
+    // Render thronglet grid
+    renderThrongletToCanvas(ctx, grid, this.palette, px, py, sz);
+
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // Name tag
+    ctx.font = 'bold 10px monospace'; ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(0,0,0,.5)';
+    ctx.fillText(this.name, this.x + 1, py - 4 + bobY + 1);
+    ctx.fillStyle = 'rgba(220,240,200,.85)';
+    ctx.fillText(this.name, this.x, py - 4 + bobY);
+
+    // Status dot + palette name badge
+    const badgeY = this.y + sz * .46 + bobY;
+    const stCol = STATUS_COLORS[this.status];
+    ctx.fillStyle = stCol;
+    ctx.beginPath(); ctx.arc(this.x - 14, badgeY, 3, 0, Math.PI * 2); ctx.fill();
+    ctx.font = 'bold 9px monospace'; ctx.fillStyle = 'rgba(200,220,180,.7)';
+    ctx.fillText(this.spec.palette, this.x + 6, badgeY + 3);
+
+    // Speech bubble
+    if (this.msg) {
+      ctx.font = '11px monospace';
+      const tw = ctx.measureText(this.msg).width;
+      const bpx = this.x + sz * .4, bpy = this.y - sz * .35 + bobY;
+      ctx.fillStyle = 'rgba(10,20,5,.85)';
+      roundRect(ctx, bpx, bpy - 12, tw + 14, 24, 6); ctx.fill();
+      ctx.strokeStyle = 'rgba(100,160,60,.25)'; ctx.lineWidth = 1;
+      roundRect(ctx, bpx, bpy - 12, tw + 14, 24, 6); ctx.stroke();
+      ctx.fillStyle = 'rgba(10,20,5,.85)';
+      ctx.beginPath(); ctx.moveTo(bpx, bpy); ctx.lineTo(bpx - 6, bpy + 2); ctx.lineTo(bpx, bpy + 6); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#dff0c8'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(this.msg, bpx + 7, bpy); ctx.textBaseline = 'alphabetic';
+    }
+
+    // Task label (for working agents)
+    if (this.task && this.status === 'working') {
+      ctx.font = '9px monospace'; ctx.textAlign = 'center';
+      const taskW = ctx.measureText(this.task).width + 10;
+      const taskX = this.x - taskW / 2, taskY = this.y + sz * .5 + 10 + bobY;
+      ctx.fillStyle = 'rgba(240,192,64,.12)';
+      roundRect(ctx, taskX, taskY, taskW, 16, 3); ctx.fill();
+      ctx.strokeStyle = 'rgba(240,192,64,.3)'; ctx.lineWidth = 0.5;
+      roundRect(ctx, taskX, taskY, taskW, 16, 3); ctx.stroke();
+      ctx.fillStyle = 'rgba(240,210,120,.85)';
+      ctx.fillText(this.task, this.x, taskY + 11);
+    }
+  }
+
+  feed() { this.mood = 1; this.moodT = 90; this.msg = 'yum!'; this.msgT = 70; fed++; emits(this.x, this.y - 35, '🍖'); }
+  pet() { this.mood = 1; this.moodT = 110; this.msg = 'purr~'; this.msgT = 70; emits(this.x, this.y - 35, '💖'); }
+  poke() { this.mood = 2; this.moodT = 45; this.msg = 'hey!'; this.msgT = 55; this.ang = Math.atan2(this.y - my, this.x - mx); emits(this.x, this.y - 35, '❗'); }
+}
+
+function roundRect(c, x, y, w, h, r) {
+  c.beginPath(); c.moveTo(x + r, y); c.lineTo(x + w - r, y); c.quadraticCurveTo(x + w, y, x + w, y + r);
+  c.lineTo(x + w, y + h - r); c.quadraticCurveTo(x + w, y + h, x + w - r, y + h); c.lineTo(x + r, y + h);
+  c.quadraticCurveTo(x, y + h, x, y + h - r); c.lineTo(x, y + r); c.quadraticCurveTo(x, y, x + r, y); c.closePath();
+}
+
+// --- Particles ---
+let parts = [];
+function emits(x, y, e) {
+  for (let i = 0; i < 5; i++) parts.push({x: x + (Math.random() - .5) * 24, y, vy: -2.5 - Math.random() * 2.5, vx: (Math.random() - .5) * 2.5, life: 1, e, sz: 16 + Math.random() * 10});
+}
+
+// --- Ambient: butterflies ---
+let butterflies = [];
+function initButterflies() {
+  const cols = ['#e8d058','#e0a0d0','#a8d8f0','#f0c080','#b0e0a0'];
+  for (let i = 0; i < 6; i++) butterflies.push({x: 100 + Math.random() * (W - 200), y: 60 + Math.random() * (H - 120), vx: (Math.random() - .5) * 1.2, vy: (Math.random() - .5) * .8, phase: Math.random() * 6.28, col: cols[i % 5], sz: 3 + Math.random() * 2});
+}
+function updateButterflies(dt) {
+  for (const b of butterflies) { b.phase += dt * 8; b.x += b.vx * dt * 60; b.y += b.vy * dt * 60; b.vx += (Math.random() - .5) * .1; b.vy += (Math.random() - .5) * .1; b.vx *= .98; b.vy *= .98; if (b.x < 60 || b.x > W - 60) b.vx *= -1; if (b.y < 60 || b.y > H - 60) b.vy *= -1; }
+}
+function drawButterflies() {
+  for (const b of butterflies) { const wing = Math.sin(b.phase) * .8; ctx.fillStyle = b.col + 'a0'; ctx.save(); ctx.translate(b.x, b.y); ctx.beginPath(); ctx.ellipse(-b.sz * wing, 0, b.sz, b.sz * .6, 0, 0, Math.PI * 2); ctx.fill(); ctx.beginPath(); ctx.ellipse(b.sz * wing, 0, b.sz, b.sz * .6, 0, 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = '#333'; ctx.fillRect(-1, -b.sz * .3, 2, b.sz * .6); ctx.restore(); }
+}
+
+// --- Ambient: pollen ---
+let pollen = [];
+function initPollen() { for (let i = 0; i < 15; i++) pollen.push({x: Math.random() * W, y: Math.random() * H, vx: .2 + Math.random() * .3, vy: -.1 + Math.random() * .2, phase: Math.random() * 6.28, sz: 1 + Math.random() * 1.5, alpha: .15 + Math.random() * .15}); }
+function updatePollen(dt) { for (const p of pollen) { p.phase += dt; p.x += p.vx * dt * 60 + Math.sin(p.phase) * 0.3; p.y += p.vy * dt * 60 + Math.cos(p.phase * 0.7) * 0.2; if (p.x > W + 10) p.x = -10; if (p.x < -10) p.x = W + 10; if (p.y < -10) p.y = H + 10; if (p.y > H + 10) p.y = -10; } }
+function drawPollen() { for (const p of pollen) { ctx.fillStyle = `rgba(240,230,180,${p.alpha})`; ctx.beginPath(); ctx.arc(p.x, p.y, p.sz, 0, Math.PI * 2); ctx.fill(); } }
+
+// --- Connections ---
+function drawConnections() {
+  ctx.lineWidth = 1;
+  for (let i = 0; i < bots.length; i++) for (let j = i + 1; j < bots.length; j++) {
+    const a = bots[i], b = bots[j], d = Math.hypot(a.x - b.x, a.y - b.y);
+    if (d < 120) { ctx.strokeStyle = `rgba(150,220,100,${((1 - d / 120) * 0.08).toFixed(3)})`; ctx.setLineDash([3, 4]); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke(); }
+  }
+  ctx.setLineDash([]);
+}
+
+// --- Interaction ---
+function getBot(x, y) { for (let i = bots.length - 1; i >= 0; i--) { if (Math.hypot(x - bots[i].x, y - bots[i].y) < bots[i].sz * .5) return bots[i]; } return null; }
+
+function act(x, y) {
+  if (tool === 'spawn') { const b = new Bot(x, y); bots.push(b); toast(`🥚 ${b.name} hatched!`, '#b0e0a0'); return; }
+  if (tool === 'inspect') { const b = getBot(x, y); if (b) showTip(x, y, b); return; }
+  const b = getBot(x, y); if (!b) return;
+  if (tool === 'feed') b.feed();
+  else if (tool === 'pet') b.pet();
+  else if (tool === 'poke') b.poke();
+}
+
+function showTip(x, y, b) {
+  tip.style.display = 'block';
+  tip.style.left = Math.min(x + 15, W - 210) + 'px';
+  tip.style.top = Math.min(y - 50, H - 80) + 'px';
+  tip.innerHTML = `<b>${b.name}</b> (${b.spec.palette})<br>Trait: ${b.spec.trait}<br>Status: <span style="color:${STATUS_COLORS[b.status]}">${b.status}</span><br>Parts: ears:${b.spec.ears} eyes:${b.spec.eyes} mouth:${b.spec.mouth} horn:${b.spec.horn} chest:${b.spec.chest}`;
+  clearTimeout(tip._t);
+  tip._t = setTimeout(() => tip.style.display = 'none', 3000);
+}
+
+cv.onmousedown = e => { md = true; act(e.clientX, e.clientY); };
+cv.onmouseup = () => md = false;
+cv.onmousemove = e => { mx = e.clientX; my = e.clientY; if (md && tool === 'pet') { const b = getBot(mx, my); if (b && b.mood !== 1) b.pet(); } cv.style.cursor = getBot(mx, my) ? (tool === 'inspect' ? 'help' : 'pointer') : 'crosshair'; };
+cv.oncontextmenu = e => { e.preventDefault(); const old = tool; tool = 'poke'; act(e.clientX, e.clientY); tool = old; };
+cv.ontouchstart = e => { e.preventDefault(); const t = e.touches[0]; mx = t.clientX; my = t.clientY; act(mx, my); };
+cv.ontouchmove = e => { const t = e.touches[0]; mx = t.clientX; my = t.clientY; };
+
+// --- Vignette ---
+function drawVignette() {
+  const grad = ctx.createRadialGradient(W / 2, H / 2, Math.min(W, H) * .3, W / 2, H / 2, Math.max(W, H) * .75);
+  grad.addColorStop(0, 'rgba(0,0,0,0)'); grad.addColorStop(1, 'rgba(0,0,0,.25)');
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+}
+
+// --- HUD ---
+function updateHUD() {
+  const counts = {working: 0, waiting: 0, sleeping: 0, dead: 0};
+  for (const b of bots) counts[b.status] = (counts[b.status] || 0) + 1;
+  document.getElementById('n').textContent = bots.length;
+  document.getElementById('sw').textContent = counts.working;
+  document.getElementById('si').textContent = counts.waiting;
+  document.getElementById('ss').textContent = counts.sleeping;
+  document.getElementById('f').textContent = fed;
+  document.getElementById('c').textContent = chats;
+  // Time of day indicator
+  const t = dayTime;
+  let todLabel, todIcon;
+  if (t < 0.2) { todLabel = 'night'; todIcon = '🌙'; }
+  else if (t < 0.35) { todLabel = 'dawn'; todIcon = '🌅'; }
+  else if (t < 0.65) { todLabel = 'day'; todIcon = '☀️'; }
+  else if (t < 0.82) { todLabel = 'afternoon'; todIcon = '🌤️'; }
+  else if (t < 0.92) { todLabel = 'dusk'; todIcon = '🌇'; }
+  else { todLabel = 'night'; todIcon = '🌙'; }
+  document.getElementById('tod').textContent = todLabel;
+  document.getElementById('time-indicator').firstChild.textContent = todIcon + ' ';
+}
+
+// --- Game loop ---
+let last = performance.now();
+function loop() {
+  const now = performance.now(), dt = Math.min((now - last) / 1000, .05); last = now;
+
+  // Update day/night
+  dayTime = (dayTime + dt * DAY_SPEED * TIME_SPEEDS[timeSpeedIdx]) % 1;
+  const sky = getSkyState(dayTime);
+
+  if (!bgCanvas || bgCanvas.width !== W) makeBg();
+  ctx.drawImage(bgCanvas, 0, 0);
+
+  // Sky tint overlay (day/night)
+  drawSkyOverlay(sky);
+
+  // Stars at night
+  drawStars(sky.stars, dt);
+
+  updateButterflies(dt); updatePollen(dt);
+  updateToasts(dt);
+
+  drawConnections(); drawButterflies();
+  bots.sort((a, b) => a.y - b.y);
+  for (const b of bots) { b.update(dt); b.draw(); }
+  drawPollen();
+  parts = parts.filter(p => p.life > 0);
+  for (const p of parts) { p.x += p.vx * dt * 60; p.y += p.vy * dt * 60; p.vy += .02 * dt * 60; p.life -= dt * 1.3; ctx.globalAlpha = Math.max(0, p.life); ctx.font = p.sz + 'px serif'; ctx.textAlign = 'center'; ctx.fillText(p.e, p.x, p.y); ctx.globalAlpha = 1; }
+  drawVignette();
+  drawToasts();
+  updateHUD();
+  requestAnimationFrame(loop);
+}
+
+// --- Initialize ---
+initButterflies(); initPollen(); initStars();
+
+const AGENT_SEEDS = ['dispatcher','Felta','Bolka','Mira','Reka','Zara','Vint','Nex'];
+const START_STATUSES = ['working','waiting','working','sleeping','waiting','waiting','working','sleeping'];
+
+for (let i = 0; i < AGENT_SEEDS.length; i++) {
+  const spec = generateThronglet(AGENT_SEEDS[i]);
+  bots.push(new Bot(0, 0, {spec, name: AGENT_SEEDS[i], status: START_STATUSES[i]}));
+}
+
+// --- Listen for external notifications (from parent dashboard) ---
+window.addEventListener('message', (evt) => {
+  if (!evt.data || evt.data.type !== 'thronglet_notification') return;
+  const { agentName } = evt.data;
+  const bot = bots.find(b => b.name === agentName);
+  if (bot) {
+    bot.mood = 1; bot.moodT = 90;
+    bot.msg = '📨 message!'; bot.msgT = 80;
+    toast(`📨 ${agentName} got a message`, '#90cdf4');
+  } else {
+    const randomBot = bots[Math.floor(Math.random() * bots.length)];
+    if (randomBot) {
+      randomBot.msg = `📨 from ${agentName}`; randomBot.msgT = 80;
+    }
+    toast(`📨 ${agentName} got a message`, '#90cdf4');
+  }
+});
+
+loop();
+</script>
+</body>
+</html>

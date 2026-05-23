@@ -24,6 +24,20 @@ function findDashboardDist(): string | null {
   return null;
 }
 
+function findChillDir(): string | null {
+  const candidates = [
+    resolve(fileURLToPath(import.meta.url), "../../../packages/dashboard/dist/chill"),
+    resolve(fileURLToPath(import.meta.url), "../../../packages/dashboard/public/chill"),
+    resolve(process.cwd(), "packages/dashboard/dist/chill"),
+    resolve(process.cwd(), "packages/dashboard/public/chill"),
+    resolve(process.cwd(), "thronglets-viz"),
+  ];
+  for (const p of candidates) {
+    if (existsSync(join(p, "index.html"))) return p;
+  }
+  return null;
+}
+
 export function startServer(
   fleet: FleetManager,
   bus: FleetEventBus,
@@ -34,13 +48,20 @@ export function startServer(
 
   const app = createHttpApp(fleet, config, workspaces);
 
+  // Serve chill mode (thronglets-viz) static files
+  const chillDir = findChillDir();
+  if (chillDir) {
+    app.use("/chill", express.static(chillDir));
+    console.log(`[server] Chill mode: serving from ${chillDir}`);
+  }
+
   // Serve dashboard static files if built
   const dashDir = findDashboardDist();
   if (dashDir) {
     app.use(express.static(dashDir));
     // SPA fallback: any non-API route serves index.html
     app.use((req, res, next) => {
-      if (req.method !== "GET" || req.path.startsWith("/api") || req.path.startsWith("/ws") || req.path === "/health") {
+      if (req.method !== "GET" || req.path.startsWith("/api") || req.path.startsWith("/ws") || req.path.startsWith("/chill") || req.path === "/health") {
         return next();
       }
       res.sendFile(join(dashDir, "index.html"));

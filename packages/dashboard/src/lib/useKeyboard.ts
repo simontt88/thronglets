@@ -6,6 +6,7 @@ export function useKeyboard() {
     setCommandBarOpen, commandBarOpen,
     setSpawnDialogOpen, spawnDialogOpen,
     agents, activeAgent, setActiveAgent,
+    mode, setMode,
   } = useFleetStore();
 
   useEffect(() => {
@@ -13,6 +14,13 @@ export function useKeyboard() {
       const meta = e.metaKey || e.ctrlKey;
       const tag = (e.target as HTMLElement)?.tagName;
       const isInput = tag === "INPUT" || tag === "TEXTAREA";
+
+      // Ctrl/Cmd+. → toggle work/chill mode
+      if (meta && e.key === ".") {
+        e.preventDefault();
+        setMode(mode === "work" ? "chill" : "work");
+        return;
+      }
 
       // Cmd/Ctrl+K → command bar
       if (meta && e.key === "k") {
@@ -57,5 +65,5 @@ export function useKeyboard() {
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [commandBarOpen, spawnDialogOpen, agents, activeAgent]);
+  }, [commandBarOpen, spawnDialogOpen, agents, activeAgent, mode]);
 }

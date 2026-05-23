@@ -1,4 +1,4 @@
-import { appendFileSync } from "fs";
+import { appendFileSync, readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { EventEmitter } from "events";
 import type { AgentDef, BridgeConfig, RuntimeType } from "../config.js";
@@ -211,6 +211,26 @@ export class FleetManager {
     this.persistState();
     this.bus.publish("status_change", name, live.sessionId, { title });
     return `"${name}" title set to "${title}"`;
+  }
+
+  private getDispatcherWorkspacePath(): string | null {
+    const disp = this.agents.get("_dispatcher");
+    return disp?.state.workspacePath || null;
+  }
+
+  setGoal(goal: string): void {
+    const wsPath = this.getDispatcherWorkspacePath();
+    if (!wsPath) return;
+    const goalPath = join(wsPath, "memory", "goal.md");
+    writeFileSync(goalPath, goal);
+  }
+
+  getGoal(): string {
+    const wsPath = this.getDispatcherWorkspacePath();
+    if (!wsPath) return "";
+    const goalPath = join(wsPath, "memory", "goal.md");
+    if (!existsSync(goalPath)) return "";
+    return readFileSync(goalPath, "utf-8").trim();
   }
 
   async spawn(name: string | undefined, runtime: RuntimeType, workspaceAlias: string, model?: string): Promise<string> {
@@ -537,7 +557,7 @@ export class FleetManager {
     const sessionsDir = getSessionsDir(name);
 
     if (name === "_dispatcher") {
-      return buildDispatcherPreamble(this.getStatus(), this.config.workspaces, sessionsDir);
+      return buildDispatcherPreamble(this.getStatus(), this.config.workspaces, sessionsDir, this.getGoal());
     }
 
     return buildAgentPreamble(name, live.state, sessionsDir);

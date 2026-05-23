@@ -132,6 +132,7 @@ export function provisionDispatcherWorkspace(wsPath: string): boolean {
     "# Fleet Notes\n\nObservations about thronglet performance, routing patterns, and fleet health.\n");
   writeIfMissing(join(wsPath, "memory", "task-log.md"),
     "# Task Log\n\nRecord of dispatched tasks and outcomes.\n");
+  writeIfMissing(join(wsPath, "memory", "goal.md"), "");
 
   console.log(`[workspace] provisioned dispatcher workspace: ${wsPath}`);
   return true;

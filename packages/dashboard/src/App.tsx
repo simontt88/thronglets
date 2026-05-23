@@ -5,10 +5,11 @@ import { GridStage } from "./components/GridStage";
 import { ChatBar } from "./components/ChatBar";
 import { CommandBar } from "./components/CommandBar";
 import { SpawnDialog } from "./components/SpawnDialog";
+import { ChillMode } from "./components/ChillMode";
 import { useKeyboard } from "./lib/useKeyboard";
 
 export function App() {
-  const { connected } = useFleetStore();
+  const { connected, mode } = useFleetStore();
 
   useEffect(() => {
     connectWS();
@@ -21,8 +22,14 @@ export function App() {
       <div className="aurora"></div>
       <div className="app">
         <TopBar />
-        <GridStage />
-        <ChatBar />
+        {mode === "work" ? (
+          <>
+            <GridStage />
+            <ChatBar />
+          </>
+        ) : (
+          <ChillMode />
+        )}
       </div>
       <CommandBar />
       <SpawnDialog />

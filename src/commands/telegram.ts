@@ -100,6 +100,8 @@ async function handleCommand(
         "  /clear <name> — fresh session",
         "  /title <name> <title> — set title",
         "  /change <name> <field> <value> — reconfigure",
+        "  /poke — nudge dispatcher to assign work",
+        "  /goal [text] — view or set fleet goal",
         "  /dispatcher [restart] — dispatcher info / restart",
         "",
         `⚙️ Runtimes:\n${runtimes}`,
@@ -264,6 +266,32 @@ async function handleCommand(
       return;
     }
 
+    case "/poke": {
+      if (!fleet.hasAgent(DISPATCHER_AGENT_NAME)) {
+        await transport.sendReply(chatId, "⚠️ Dispatcher is offline. Use /dispatcher restart first.");
+        return;
+      }
+      const goal = fleet.getGoal();
+      const pokeMsg = goal
+        ? `[POKE] The user wants you to keep the fleet working. Review the current goal, check fleet status, and assign/reassign tasks to idle agents based on what needs to be done next. Be autonomous — don't ask, just dispatch.`
+        : `[POKE] The user poked you. There is no goal set yet — ask the user what the fleet should focus on, then set it with fleet_set_goal.`;
+      await transport.sendReply(chatId, "👉 Poking dispatcher...");
+      await sendToAgent(chatId, DISPATCHER_AGENT_NAME, pokeMsg, transport, fleet, "dispatcher");
+      return;
+    }
+
+    case "/goal": {
+      const newGoal = args.join(" ").trim();
+      if (newGoal) {
+        fleet.setGoal(newGoal);
+        await transport.sendReply(chatId, `Goal set: ${newGoal}`);
+      } else {
+        const current = fleet.getGoal();
+        await transport.sendReply(chatId, current ? `Current goal:\n${current}` : "No goal set. Use /goal <text> to set one.");
+      }
+      return;
+    }
+
     case "/workspace": {
       const sub = args[0];
       if (sub === "add") {
@@ -293,6 +321,8 @@ async function handleCommand(
         "  /clear <name> — fresh session",
         "  /title <name> <title> — set title",
         "  /change <name> <field> <value> — reconfigure",
+        "  /poke — nudge dispatcher to assign work",
+        "  /goal [text] — view or set fleet goal",
         "  /status [name] — detail",
         "  /dispatcher [restart] — dispatcher info",
         "  /workspace [add alias path] — manage workspaces",

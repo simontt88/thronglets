@@ -37,6 +37,13 @@ interface CardSize {
   height: number;
 }
 
+export interface ChillNotification {
+  id: string;
+  agentName: string;
+  text: string;
+  ts: number;
+}
+
 interface FleetStore {
   agents: AgentState[];
   workspaces: WorkspaceEntry[];
@@ -44,10 +51,12 @@ interface FleetStore {
   theme: "light" | "dark";
 
   // UI state
+  mode: "work" | "chill";
   currentWorkspace: string; // "all" or workspace alias
   cols: number;
   dispatcherOpen: boolean;
   selectedAgent: string | null;
+  chillNotifications: ChillNotification[];
 
   // Per-card session viewing
   viewingSession: Record<string, string>; // agentName → sessionId being viewed
@@ -72,6 +81,7 @@ interface FleetStore {
   // Actions
   setConnected: (v: boolean) => void;
   setTheme: (t: "light" | "dark") => void;
+  setMode: (m: "work" | "chill") => void;
   setWorkspace: (ws: string) => void;
   setCols: (n: number) => void;
   toggleDispatcher: () => void;
@@ -83,6 +93,8 @@ interface FleetStore {
   setActiveAgent: (name: string) => void;
   setCommandBarOpen: (v: boolean) => void;
   setSpawnDialogOpen: (v: boolean) => void;
+  pushChillNotification: (agentName: string, text: string) => void;
+  dismissChillNotification: (id: string) => void;
 }
 
 const savedSizes = JSON.parse(localStorage.getItem("ab-card-sizes") || "{}");
@@ -95,10 +107,12 @@ export const useFleetStore = create<FleetStore>((set, get) => ({
   workspaces: [],
   connected: false,
   theme: savedTheme,
+  mode: "work",
   currentWorkspace: "all",
   cols: 3,
   dispatcherOpen: true,
   selectedAgent: null,
+  chillNotifications: [],
   viewingSession: {},
   sessionLists: {},
   sessionEvents: {},
@@ -115,6 +129,7 @@ export const useFleetStore = create<FleetStore>((set, get) => ({
     document.body.className = theme === "dark" ? "theme-dark" : "";
     set({ theme });
   },
+  setMode: (mode) => set({ mode }),
   setWorkspace: (ws) => {
     const { agents } = get();
     const filtered = ws === "all" ? agents : agents.filter((a) => a.workspace === ws);
@@ -155,6 +170,11 @@ export const useFleetStore = create<FleetStore>((set, get) => ({
   setActiveAgent: (name) => set({ activeAgent: name }),
   setCommandBarOpen: (v) => set({ commandBarOpen: v }),
   setSpawnDialogOpen: (v) => set({ spawnDialogOpen: v }),
+  pushChillNotification: (agentName, text) => {
+    const notification: ChillNotification = { id: `${Date.now()}-${Math.random()}`, agentName, text, ts: Date.now() };
+    set((s) => ({ chillNotifications: [...s.chillNotifications.slice(-4), notification] }));
+  },
+  dismissChillNotification: (id) => set((s) => ({ chillNotifications: s.chillNotifications.filter((n) => n.id !== id) })),
 }));
 
 // Apply theme on load
@@ -238,6 +258,9 @@ export function connectWS() {
             ),
           }));
           appendSessionEvent(event.agentName, { ts: event.ts, type: "user_message", text: event.payload?.text });
+          if (useFleetStore.getState().mode === "chill") {
+            useFleetStore.getState().pushChillNotification(event.agentName, event.payload?.text?.slice(0, 80) || "received a message");
+          }
           break;
         case "agent_message":
           useFleetStore.setState((s) => ({
@@ -248,6 +271,9 @@ export function connectWS() {
             ),
           }));
           appendSessionEvent(event.agentName, { ts: event.ts, type: "agent_message", text: event.payload?.text });
+          if (useFleetStore.getState().mode === "chill") {
+            useFleetStore.getState().pushChillNotification(event.agentName, event.payload?.text?.slice(0, 80) || "sent a message");
+          }
           break;
         case "error":
           useFleetStore.setState((s) => ({
@@ -430,6 +456,12 @@ export async function setAgentTitle(name: string, title: string) {
     useFleetStore.setState((s) => ({
       agents: s.agents.map((a) => a.name === name ? { ...a, title: title || undefined } : a),
     }));
+  } catch {}
+}
+
+export async function pokeDispatcher() {
+  try {
+    await fetch(`${serverBase.http}/api/fleet/poke`, { method: "POST" });
   } catch {}
 }
 

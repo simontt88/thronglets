@@ -5,7 +5,7 @@ import { PixelThronglet } from "./PixelThronglet";
 import { generateThronglet } from "../lib/thronglet";
 
 export function TopBar() {
-  const { agents, workspaces, currentWorkspace, setWorkspace, theme, setTheme, toggleDispatcher } = useFleetStore();
+  const { agents, workspaces, currentWorkspace, setWorkspace, theme, setTheme, toggleDispatcher, mode, setMode } = useFleetStore();
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState("");
 
@@ -66,6 +66,13 @@ export function TopBar() {
       </nav>
 
       <div className="topbar-right">
+        <button
+          className={"icon-btn mode-toggle" + (mode === "chill" ? " active" : "")}
+          title={mode === "work" ? "Switch to Chill mode (Ctrl+.)" : "Switch to Work mode (Ctrl+.)"}
+          onClick={() => setMode(mode === "work" ? "chill" : "work")}
+        >
+          {mode === "work" ? "🎮" : "💼"}
+        </button>
         <button className="icon-btn" title="Fleet status panel" onClick={() => toggleDispatcher()}>
           <Icon name="dispatch" size={14} />
         </button>

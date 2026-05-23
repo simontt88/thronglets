@@ -542,6 +542,9 @@ body.theme-dark .aurora::before {
 }
 .df-title { flex: 1; font-size: 13px; font-weight: 700; color: var(--t-1); }
 .df-title .df-sub { display: block; font-size: 10.5px; color: var(--t-3); font-weight: 600; margin-top: 1px; font-family: var(--font-mono); }
+.df-poke { width: 28px; height: 24px; border-radius: 7px; color: var(--t-3); display: grid; place-items: center; font-size: 14px; cursor: pointer; }
+.df-poke:hover { background: rgba(245,166,35,0.12); }
+.df-poke:active { transform: scale(0.9); }
 .df-close { width: 24px; height: 24px; border-radius: 7px; color: var(--t-3); display: grid; place-items: center; }
 .df-close:hover { color: var(--t-1); background: rgba(245,166,35,0.08); }
 
@@ -1111,3 +1114,45 @@ strong { font-weight: 700; color: var(--t-1); }
   font-family: var(--font-display); width: 120px;
 }
 .title-input:focus { border-color: var(--st-working); }
+
+/* Chill Mode */
+.chill-mode {
+  flex: 1; position: relative; display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.chill-iframe {
+  flex: 1; width: 100%; border: none; background: #1a2e1a;
+}
+.chill-toasts {
+  position: absolute; top: 16px; right: 16px;
+  display: flex; flex-direction: column; gap: 8px;
+  z-index: 1000; pointer-events: none;
+}
+.chill-toast {
+  pointer-events: auto;
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg-2); border: 1px solid var(--border-2);
+  border-radius: 12px; padding: 10px 14px;
+  box-shadow: var(--shadow-pop); cursor: pointer;
+  animation: toast-in 0.3s ease-out;
+  backdrop-filter: blur(12px);
+  min-width: 220px;
+}
+.chill-toast:hover { border-color: var(--st-working); }
+.chill-toast-icon { font-size: 16px; }
+.chill-toast-text { flex: 1; font-size: 12px; color: var(--t-1); line-height: 1.4; }
+.chill-toast-text strong { font-weight: 600; }
+.chill-toast-close {
+  background: none; border: none; color: var(--t-4); cursor: pointer;
+  font-size: 16px; padding: 0 2px; line-height: 1;
+}
+.chill-toast-close:hover { color: var(--t-2); }
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+/* Mode toggle */
+.mode-toggle { font-size: 16px; }
+.mode-toggle.active { background: rgba(72,187,120,0.15); }

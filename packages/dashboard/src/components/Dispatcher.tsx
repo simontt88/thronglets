@@ -1,5 +1,5 @@
 import { useState, useRef } from "react";
-import { useFleetStore, getAgentAccent } from "../stores/fleet";
+import { useFleetStore, getAgentAccent, pokeDispatcher } from "../stores/fleet";
 import { AGENT_COLORS } from "../lib/constants";
 import { Icon } from "./Icons";
 import { PixelThronglet } from "./PixelThronglet";
@@ -72,6 +72,9 @@ export function Dispatcher() {
           Habitat Status
           <span className="df-sub">{filtered.length} thronglets</span>
         </div>
+        <button className="df-poke" onClick={pokeDispatcher} title="Poke — nudge dispatcher to assign work">
+          👉
+        </button>
         <button className="df-close" onClick={toggleDispatcher}>
           <Icon name="x" size={13} />
         </button>
