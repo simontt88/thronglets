@@ -90,9 +90,9 @@ export class TelegramTransport implements Transport {
     // Register slash commands for autocomplete menu
     this.bot.setMyCommands([
       { command: "start", description: "Welcome & setup info" },
-      { command: "new", description: "Hatch a thronglet (auto-named)" },
+      { command: "hatch", description: "Hatch a throng (auto-named)" },
       { command: "kill", description: "Release: /kill <name>" },
-      { command: "fleet", description: "Fleet status — all thronglets" },
+      { command: "fleet", description: "Fleet status — all throngs" },
       { command: "dispatcher", description: "Dispatcher status / restart" },
       { command: "status", description: "Detail: /status <name>" },
       { command: "title", description: "Set title: /title <name> <title>" },

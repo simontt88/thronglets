@@ -171,7 +171,7 @@ export function ChatBar() {
               ? `${activeAgent} is grinding…`
               : activeAgent
                 ? `Talk to @${activeAgent}… (Shift+Enter to send)`
-                : "Pick a Thronglet first…"
+                : "Pick a throng first…"
           }
           value={text}
           onChange={(e) => {

@@ -86,17 +86,17 @@ async function handleCommand(
       const welcome = [
         `🐣 Thronglets v${version}`,
         "",
-        "Your thronglet fleet — each creature runs in a workspace with full coding powers.",
+        "Your throng fleet — each creature runs in a workspace with full coding powers.",
         "",
         "💬 How to talk:",
         "  Just type — dispatcher routes it for you",
-        "  @name msg — send directly to a thronglet",
+        "  @name msg — send directly to a throng",
         "  @all msg — broadcast to all",
         "",
         "📋 Commands:",
-        "  /new [name] [runtime] [workspace] — hatch a thronglet",
-        "  /kill <name> — release a thronglet",
-        "  /fleet — list all thronglets + status",
+        "  /hatch [runtime] [workspace] — hatch a throng (auto-named)",
+        "  /kill <name> — release a throng",
+        "  /fleet — list all throngs + status",
         "  /clear <name> — fresh session",
         "  /title <name> <title> — set title",
         "  /change <name> <field> <value> — reconfigure",
@@ -112,15 +112,16 @@ async function handleCommand(
       return;
     }
 
+    case "/hatch":
     case "/new": {
-      const [name, runtime, workspace] = args;
-      if (!name && transport instanceof TelegramTransport && transport.getBot()) {
+      const [runtimeArg, workspace] = args;
+      if (!runtimeArg && transport instanceof TelegramTransport && transport.getBot()) {
         sendNewPrompt(transport.getBot()!, chatId);
         return;
       }
-      const rt = (runtime || config.agents[0]?.runtime || "cursor") as RuntimeType;
+      const rt = (runtimeArg || config.agents[0]?.runtime || "cursor") as RuntimeType;
       const ws = workspace || cwdAlias?.alias || workspaces[0]?.alias || "cwd";
-      const result = await fleet.spawn(name || undefined, rt, ws);
+      const result = await fleet.spawn(undefined, rt, ws);
       await transport.sendReply(chatId, result);
       return;
     }
@@ -168,7 +169,7 @@ async function handleCommand(
       const status = fleet.getStatus();
       const thronglets = status.agents.filter((a) => a.name !== "_dispatcher");
       if (thronglets.length === 0) {
-        await transport.sendReply(chatId, "No thronglets running.\nHatch one: /new [runtime] [workspace]");
+        await transport.sendReply(chatId, "No throngs running.\nHatch one: /hatch [runtime] [workspace]");
         return;
       }
 
@@ -207,7 +208,7 @@ async function handleCommand(
         ? `\n🔮 *Dispatcher* (Orix): ${dispatcher.status} · ${timeSince(dispatcher.lastActivity)}`
         : "\n⚠️ Dispatcher: offline";
 
-      const header = `Fleet: ${thronglets.length} thronglets (${countParts.join(", ")})`;
+      const header = `Fleet: ${thronglets.length} throngs (${countParts.join(", ")})`;
       await transport.sendReply(chatId, `${header}\n\n${sections.join("\n\n")}${dispLine}`);
       return;
     }
@@ -312,10 +313,10 @@ async function handleCommand(
     case "/help":
       await transport.sendReply(chatId, [
         "💬 Just type — dispatcher handles routing",
-        "  @name msg — send to a specific thronglet",
+        "  @name msg — send to a specific throng",
         "  @all msg — broadcast to all",
         "", "📋 Commands:",
-        "  /new [name] [runtime] [workspace] — hatch",
+        "  /hatch [runtime] [workspace] — hatch a throng",
         "  /kill <name> — release",
         "  /fleet — list all + status",
         "  /clear <name> — fresh session",
@@ -380,7 +381,7 @@ async function handleMessage(
   if (agentList.length === 1 && !dispatcherEnabled) {
     await sendToAgent(chatId, agentList[0], text, transport, fleet);
   } else if (agentList.length === 0 && !fleet.hasAgent(DISPATCHER_AGENT_NAME)) {
-    await transport.sendReply(chatId, "No thronglets running.\n\nHatch one: /new [runtime] [workspace]");
+    await transport.sendReply(chatId, "No throngs running.\n\nHatch one: /hatch [runtime] [workspace]");
   } else if (dispatcherEnabled) {
     // Auto-recover dispatcher if needed
     const dispatcherAgent = fleet.getAgent(DISPATCHER_AGENT_NAME);
@@ -389,7 +390,7 @@ async function handleMessage(
       if (dispatcherAgent) await fleet.kill(DISPATCHER_AGENT_NAME);
       const restarted = await startDispatcher(fleet, bus, config, workspaces);
       if (!restarted) {
-        await transport.sendReply(chatId, "❌ Dispatcher failed to restart. Use @name to talk to a thronglet directly.");
+        await transport.sendReply(chatId, "❌ Dispatcher failed to restart. Use @name to talk to a throng directly.");
         return;
       }
       await transport.sendReply(chatId, "✅ Dispatcher recovered. Routing your message now...");

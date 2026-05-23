@@ -7,8 +7,6 @@ import { generateThronglet, generateUniqueName } from "../lib/thronglet";
 
 const RUNTIMES = [
   { id: "cursor",      label: "Cursor",      desc: "in-IDE edits · refactors · review" },
-  { id: "claude-code", label: "Claude Code", desc: "terminal · multi-step sweeps · synthesis" },
-  { id: "codex",       label: "Codex",       desc: "automation · planning · long-running jobs" },
 ];
 
 export function SpawnDialog() {
@@ -25,7 +23,7 @@ export function SpawnDialog() {
       try {
         setName(generateUniqueName(agents.map((a) => a.name)));
       } catch {
-        setName("Thronglet");
+        setName("Throng");
       }
       setStep(0);
       setRuntime("cursor");
@@ -84,7 +82,7 @@ export function SpawnDialog() {
           <div className="spawn-thronglet-preview">
             <PixelThronglet spec={previewSpec} mood="happy" size={48} />
           </div>
-          <div className="spawn-title">Hatch a Thronglet</div>
+          <div className="spawn-title">Hatch a Throng</div>
           <button className="spawn-close" onClick={() => setSpawnDialogOpen(false)}><Icon name="x" size={14} /></button>
         </div>
 

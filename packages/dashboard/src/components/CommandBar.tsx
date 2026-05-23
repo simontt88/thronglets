@@ -35,11 +35,11 @@ export function CommandBar() {
 
     cmds.push({
       id: "spawn",
-      label: "Hatch new Thronglet",
+      label: "Hatch new Throng",
       detail: "Ctrl+N",
       icon: "plus",
       action: () => { setCommandBarOpen(false); setSpawnDialogOpen(true); },
-      keywords: "new create add agent spawn hatch thronglet",
+      keywords: "new create add agent spawn hatch throng",
     });
 
     for (const a of agents) {

@@ -35,7 +35,7 @@ export function WorkspaceHeader() {
         </div>
         <div className="h-title">
           {title}
-          <span className="h-sub">{filtered.length} thronglet{filtered.length !== 1 ? "s" : ""}</span>
+          <span className="h-sub">{filtered.length} throng{filtered.length !== 1 ? "s" : ""}</span>
         </div>
         {wsPath_ && <div className="h-path">{wsPath_}</div>}
       </div>

@@ -324,7 +324,7 @@ async function handleClearFlow(
 }
 
 export function sendNewPrompt(bot: TelegramBot, chatId: string): void {
-  bot.sendMessage(Number(chatId), "🐣 Hatch a new thronglet:", {
+  bot.sendMessage(Number(chatId), "🐣 Hatch a new throng:", {
     reply_markup: {
       inline_keyboard: [[{ text: "Hatch →", callback_data: "new:start" }]],
     },

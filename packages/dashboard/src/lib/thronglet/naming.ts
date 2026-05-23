@@ -11,7 +11,7 @@ export function pickName(seed: number): string {
 }
 
 /**
- * Generate a unique thronglet name that doesn't collide with existing names.
+ * Generate a unique throng name that doesn't collide with existing names.
  * Uses timestamp + random salt for entropy.
  */
 export function generateUniqueName(existingNames: string[]): string {

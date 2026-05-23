@@ -21,7 +21,7 @@ cp bridge.yaml.example config.yaml
 - Telegram bot token
 - Cursor API key
 - Their Telegram chat ID (tell them to message [@userinfobot](https://t.me/userinfobot) to get it)
-- Preferred model (default: `claude-sonnet-4-6`, options: `claude-sonnet-4-6`, `claude-opus-4-6`)
+- Preferred model (default: `claude-sonnet-4-6`, other options: `claude-opus-4-6`)
 
 Fill in `config.yaml` with their answers. Set `allowed_chats` to their chat ID.
 

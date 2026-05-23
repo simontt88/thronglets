@@ -168,7 +168,7 @@ export function SessionCard({ agent, placement }: Props) {
           ))
         ) : (
           <div className="conversation-empty">
-            {isArchived ? "This Thronglet's memories are archived…" : isDead ? "This Thronglet has passed on… 🪦" : "Waiting for first interaction… 🥚"}
+            {isArchived ? "This throng's memories are archived…" : isDead ? "This throng has passed on… 🪦" : "Waiting for first interaction… 🥚"}
           </div>
         )}
         {isWorking && !isArchived && (
@@ -243,7 +243,7 @@ function MessageBubble({ event, accent, isDispatcher }: { event: SessionEvent; a
   const isFromAgent = isUser && sender !== null;
   const displayName = isFromAgent
     ? (sender === "_dispatcher" ? "Orix" : sender)
-    : isUser ? "you" : isError ? "error" : isDispatcher ? "Orix" : "thronglet";
+    : isUser ? "you" : isError ? "error" : isDispatcher ? "Orix" : "throng";
   const labelIcon = isFromAgent ? "◆" : isUser ? "▶" : isError ? "✕" : "◀";
 
   return (
