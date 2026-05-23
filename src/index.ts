@@ -558,8 +558,8 @@ async function main() {
     // Auto-recover dispatcher if it died
     if (dispatcherConfig.enabled) {
       const disp = fleet.getAgent(DISPATCHER_AGENT_NAME);
-      if (!disp || disp.status === "dead") {
-        console.log("[heartbeat] dispatcher is dead — auto-recovering...");
+      if (!disp || disp.status === "dead" || disp.status === "error") {
+        console.log(`[heartbeat] dispatcher is ${disp?.status ?? "gone"} — auto-recovering...`);
         if (disp) await fleet.kill(DISPATCHER_AGENT_NAME);
         const ok = await startDispatcher(fleet, bus, config, workspaces);
         console.log(`[heartbeat] dispatcher recovery: ${ok ? "success" : "failed"}`);
