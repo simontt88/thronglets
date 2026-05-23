@@ -1,6 +1,7 @@
 import type { FleetManager, WorkspaceEntry } from "./manager.js";
 import type { FleetEventBus } from "./manager.js";
 import type { BridgeConfig, RuntimeType } from "../config.js";
+import { provisionDispatcherWorkspace } from "./workspace-init.js";
 
 const DISPATCHER_NAME = "_dispatcher";
 
@@ -42,6 +43,13 @@ export async function startDispatcher(
   }
 
   const wsAlias = dc.workspace || workspaces[0]?.alias || "cwd";
+
+  // Auto-provision dispatcher workspace if it doesn't have an AGENTS.md
+  const wsEntry = workspaces.find((w) => w.alias === wsAlias);
+  if (wsEntry) {
+    provisionDispatcherWorkspace(wsEntry.path);
+  }
+
   const result = await fleet.spawn(DISPATCHER_NAME, dc.runtime, wsAlias, dc.model);
   console.log(`[dispatcher] ${result}`);
 

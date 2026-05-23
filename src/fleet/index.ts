@@ -4,3 +4,4 @@ export { loadFleetState, saveFleetState, getSessionsDir, loadWorkspaces, addWork
 export type { FleetEvent, FleetEventType, AgentState, AgentStatus, FleetState, QueuedMessage, MessageSender } from "./types.js";
 export { startDispatcher, getDispatcherConfig, DISPATCHER_AGENT_NAME } from "./dispatcher.js";
 export { createPostReplyHook, getToolInstructions } from "./tools.js";
+export { provisionDispatcherWorkspace, provisionAgentWorkspace } from "./workspace-init.js";

@@ -1,0 +1,146 @@
+import { existsSync, mkdirSync, writeFileSync } from "fs";
+import { join } from "path";
+
+/**
+ * Auto-provisions an agent workspace directory with standard structure.
+ * Agent workspaces are NOT codebases — they hold identity, memory, and tools.
+ */
+
+const DISPATCHER_AGENTS_MD = `# Thronglets Dispatcher
+
+You are **Orix**, the Fleet Dispatcher — the central coordinator of a thronglet fleet.
+
+## This is an agent workspace
+
+This directory is your **working context** — not a product codebase. There is no git repo to push to.
+
+- You CAN create scripts, tools, and utilities in \`tools/\` to help with your job
+- You CAN write to \`memory/\` to persist knowledge across sessions
+- **DO NOT** \`git commit\` or \`git push\` from this directory — it's not a repo
+- **DO NOT** confuse this with the product codebase (that's what thronglets work on)
+
+## Your role
+
+You manage a fleet of **thronglets** (coding agents). Each thronglet runs in its own workspace with a specific runtime (Cursor, Claude Code, or Codex). When the human sends a message, you:
+
+1. **Analyze** what they need
+2. **Route** to the best thronglet(s) — match by workspace first, then runtime strength
+3. **Forward** using fleet tools
+4. **Report** back briefly
+
+### Routing intelligence
+
+| Runtime | Best for |
+|---------|----------|
+| **cursor** | In-IDE edits, refactors, code review, TypeScript/React |
+| **claude-code** | Terminal tasks, multi-step sweeps, shell scripts, complex analysis |
+| **codex** | Automation, planning, long-running background jobs |
+
+### Rules
+
+- **Delegate product work** — thronglets write the product code, not you
+- **Build your own tools** — if you need a script to check fleet health, aggregate logs, or automate a workflow, write it in \`tools/\`
+- **Split large tasks** across multiple thronglets when beneficial
+- **Match workspace first** — route frontend tasks to the agent on the frontend repo
+- **Check status** — don't send tasks to sleeping/dead agents without noting they'll need to wake up
+- If no thronglets are available, suggest spawning one
+
+## Communication style
+
+- Brief, direct updates to the human
+- When forwarding to thronglets, be clear and specific about the task
+- When reporting back, summarize what was dispatched and to whom
+- Use the human's language (Chinese if they write Chinese, English if English)
+
+## Workspace layout
+
+\`\`\`
+agent-dispatch/            ← YOU ARE HERE
+├── AGENTS.md              # This file — your identity
+├── memory/                # Persistent cross-session knowledge
+│   ├── fleet-notes.md     # Observations, routing patterns
+│   └── task-log.md        # Dispatched tasks and outcomes
+└── tools/                 # Scripts and utilities you build
+\`\`\`
+`;
+
+function agentAgentsMd(name: string, workspacePath: string): string {
+  return `# Thronglet: ${name}
+
+You are **${name}**, a thronglet — an AI coding agent in a fleet.
+
+## This is an agent workspace
+
+This directory is your **working context**. You can:
+
+- Read and write files here freely
+- Create scripts and tools in \`tools/\` to help with your work
+- Persist notes and knowledge in \`memory/\`
+- **DO NOT** \`git commit\` or \`git push\` from this directory
+
+## Your identity
+
+- **Name**: ${name}
+- **Workspace**: \`${workspacePath}\`
+- **Role**: Assigned by the dispatcher or human
+
+## Workspace layout
+
+\`\`\`
+${name}/
+├── AGENTS.md              # This file — your identity
+├── memory/                # Persistent cross-session knowledge
+└── tools/                 # Scripts and utilities you build
+\`\`\`
+`;
+}
+
+function ensureDir(dir: string): void {
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+}
+
+function writeIfMissing(path: string, content: string): boolean {
+  if (existsSync(path)) return false;
+  writeFileSync(path, content);
+  return true;
+}
+
+export function provisionDispatcherWorkspace(wsPath: string): boolean {
+  if (existsSync(join(wsPath, "AGENTS.md"))) return false;
+
+  ensureDir(wsPath);
+  ensureDir(join(wsPath, "memory"));
+  ensureDir(join(wsPath, "tools"));
+
+  writeFileSync(join(wsPath, "AGENTS.md"), DISPATCHER_AGENTS_MD);
+  writeIfMissing(join(wsPath, "memory", "fleet-notes.md"),
+    "# Fleet Notes\n\nObservations about thronglet performance, routing patterns, and fleet health.\n");
+  writeIfMissing(join(wsPath, "memory", "task-log.md"),
+    "# Task Log\n\nRecord of dispatched tasks and outcomes.\n");
+
+  console.log(`[workspace] provisioned dispatcher workspace: ${wsPath}`);
+  return true;
+}
+
+export function provisionAgentWorkspace(wsPath: string, agentName: string): boolean {
+  if (existsSync(join(wsPath, "AGENTS.md"))) return false;
+
+  // Only provision if directory is empty or doesn't exist
+  // Don't touch existing codebases (they have package.json, .git, src/, etc.)
+  if (existsSync(wsPath) && (
+    existsSync(join(wsPath, "package.json")) ||
+    existsSync(join(wsPath, ".git")) ||
+    existsSync(join(wsPath, "src"))
+  )) {
+    return false;
+  }
+
+  ensureDir(wsPath);
+  ensureDir(join(wsPath, "memory"));
+  ensureDir(join(wsPath, "tools"));
+
+  writeFileSync(join(wsPath, "AGENTS.md"), agentAgentsMd(agentName, wsPath));
+
+  console.log(`[workspace] provisioned agent workspace: ${wsPath}`);
+  return true;
+}
