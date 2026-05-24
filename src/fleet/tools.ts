@@ -1,9 +1,9 @@
 import type { FleetManager } from "./manager.js";
 import type { MessageSender, WorkspaceEntry } from "./types.js";
 import type { CommsMode } from "../config.js";
+import { DISPATCHER_NAME } from "../utils/constants.js";
 
 const FLEET_MARKER_REGEX = /\[FLEET:(\w+):(.*?)\]/g;
-const DISPATCHER_NAME = "_dispatcher";
 
 type ToolPermission = "dispatcher" | "all";
 

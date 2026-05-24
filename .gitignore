@@ -6,8 +6,10 @@ logs/
 # Credentials & config
 bridge.yaml
 bridge.yml
+config.yaml
 .env
 .env.*
+.npmrc
 .thronglets/
 workspaces.yaml
 

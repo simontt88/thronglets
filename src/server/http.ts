@@ -3,9 +3,9 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import type { FleetManager } from "../fleet/index.js";
 import type { BridgeConfig, RuntimeType } from "../config.js";
-import type { WorkspaceEntry } from "../fleet/index.js";
 import { readdirSync, readFileSync, existsSync } from "fs";
-import { getSessionsDir, addWorkspace, removeWorkspace, renameWorkspace, loadWorkspaces } from "../fleet/state.js";
+import { getSessionsDir } from "../fleet/state.js";
+import { DISPATCHER_NAME, POKE_MESSAGE_WITH_GOAL, POKE_MESSAGE_NO_GOAL } from "../utils/constants.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, "../../package.json"), "utf-8"));
@@ -15,7 +15,6 @@ const startTime = Date.now();
 export function createHttpApp(
   fleet: FleetManager,
   config: BridgeConfig,
-  workspaces: WorkspaceEntry[],
 ): express.Application {
   const app = express();
   app.use(express.json());
@@ -47,7 +46,7 @@ export function createHttpApp(
       working: status.working,
       waiting: status.waiting,
       sleeping: status.sleeping,
-      workspaces: workspaces.map((w) => ({ alias: w.alias, path: w.path })),
+      workspaces: fleet.listWorkspaces().map((w) => ({ alias: w.alias, path: w.path })),
       runtimes: config.agents.map((a) => ({ name: a.name, runtime: a.runtime, model: a.model })),
     });
   });
@@ -145,7 +144,8 @@ export function createHttpApp(
   app.post("/api/fleet/spawn", async (req, res) => {
     const { name, runtime, workspace, model } = req.body;
     const rt = (runtime || config.agents[0]?.runtime || "cursor") as RuntimeType;
-    const ws = workspace || workspaces[0]?.alias || "cwd";
+    const wsList = fleet.listWorkspaces();
+    const ws = workspace || wsList[0]?.alias || "cwd";
     const result = await fleet.spawn(name || undefined, rt, ws, model);
     const success = !result.includes("already exists") && !result.includes("Unknown");
     res.status(success ? 201 : 400).json({ message: result, success });
@@ -172,7 +172,7 @@ export function createHttpApp(
   });
 
   app.get("/api/dispatcher/status", (_req, res) => {
-    const dispatcher = fleet.getAgent("_dispatcher");
+    const dispatcher = fleet.getAgent(DISPATCHER_NAME);
     res.json({
       enabled: !!config.dispatcher?.enabled,
       running: !!dispatcher,
@@ -186,7 +186,7 @@ export function createHttpApp(
       res.status(400).json({ error: "name, field, and value are required" });
       return;
     }
-    const result = await fleet.change(name, field, value, config, workspaces);
+    const result = await fleet.change(name, field, value, config, fleet.listWorkspaces());
     res.json({ message: result });
   });
 
@@ -196,11 +196,8 @@ export function createHttpApp(
       res.status(400).json({ error: "alias and path are required" });
       return;
     }
-    const result = addWorkspace(alias, path);
-    const updated = loadWorkspaces();
-    workspaces.length = 0;
-    workspaces.push(...updated);
-    res.json({ message: result, workspaces: updated });
+    const result = fleet.addWorkspace(alias, path);
+    res.json({ message: result, workspaces: fleet.listWorkspaces() });
   });
 
   app.patch("/api/workspaces/:alias", (req, res) => {
@@ -210,17 +207,12 @@ export function createHttpApp(
       res.status(400).json({ error: "alias is required" });
       return;
     }
-    const result = renameWorkspace(oldAlias, newAlias);
-    if (result.startsWith("Error")) {
+    const result = fleet.renameWorkspace(oldAlias, newAlias);
+    if (result.startsWith("Error") || result.includes("not found")) {
       res.status(400).json({ error: result });
       return;
     }
-    // Update in-memory workspace list and any agents using the old alias
-    const updated = loadWorkspaces();
-    workspaces.length = 0;
-    workspaces.push(...updated);
-    fleet.renameWorkspace(oldAlias, newAlias);
-    res.json({ message: result, workspaces: updated });
+    res.json({ message: result, workspaces: fleet.listWorkspaces() });
   });
 
   app.delete("/api/workspaces/:alias", (req, res) => {
@@ -234,11 +226,8 @@ export function createHttpApp(
       });
       return;
     }
-    const result = removeWorkspace(alias);
-    const updated = loadWorkspaces();
-    workspaces.length = 0;
-    workspaces.push(...updated);
-    res.json({ message: result, workspaces: updated });
+    const result = fleet.removeWorkspace(alias);
+    res.json({ message: result, workspaces: fleet.listWorkspaces() });
   });
 
   app.post("/api/agents/:name/title", (req, res) => {
@@ -247,18 +236,14 @@ export function createHttpApp(
     res.json({ message: result });
   });
 
-  const POKE_MESSAGE = `[POKE] The user wants you to keep the fleet working. Review the current goal, check fleet status, and assign/reassign tasks to idle agents based on what needs to be done next. Be autonomous — don't ask, just dispatch.`;
-
   app.post("/api/fleet/poke", async (_req, res) => {
-    if (!fleet.hasAgent("_dispatcher")) {
+    if (!fleet.hasAgent(DISPATCHER_NAME)) {
       res.status(503).json({ error: "Dispatcher is offline" });
       return;
     }
     const goal = fleet.getGoal();
-    const msg = goal
-      ? POKE_MESSAGE
-      : `[POKE] The user poked you. There is no goal set yet — ask the user what the fleet should focus on, then set it with fleet_set_goal.`;
-    fleet.send("_dispatcher", msg, "user").catch(() => {});
+    const msg = goal ? POKE_MESSAGE_WITH_GOAL : POKE_MESSAGE_NO_GOAL;
+    fleet.send(DISPATCHER_NAME, msg, "user").catch(() => {});
     res.json({ ok: true, message: "Dispatcher poked" });
   });
 

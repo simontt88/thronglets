@@ -13,8 +13,7 @@ Before anything else, help the user get running. Walk through these steps intera
 
 ### 2. Configuration
 ```bash
-cp bridge.yaml.example config.yaml
-# or: cp bridge.yaml.example ~/.thronglets/config.yaml (global)
+cp config.yaml.example ~/.thronglets/config.yaml
 ```
 
 **Ask the user for:**
@@ -44,7 +43,7 @@ cd ../..
 
 Then restart the service — dashboard at `http://localhost:3847`.
 
-**Remote server (e.g. DGX1):** The service binds to `127.0.0.1`. Use SSH port forwarding:
+**Remote server:** The service binds to `127.0.0.1`. Use SSH port forwarding:
 ```bash
 ssh -L 3847:127.0.0.1:3847 user@server
 # Then open http://localhost:3847 in your browser
@@ -93,9 +92,10 @@ src/
 ├── cli.ts                # CLI argument parsing
 ├── rules-sync.ts         # Cross-runtime rules synchronization
 ├── commands/
-│   └── telegram.ts       # Telegram command routing (/new, /kill, /fleet, @mentions)
+│   └── telegram.ts       # Telegram command routing (/hatch, /kill, /fleet, @mentions)
 ├── fleet/
-│   ├── manager.ts        # FleetManager: spawn, kill, send, restore, health check
+│   ├── manager.ts        # FleetManager: spawn, kill, send, restore, workspace CRUD
+│   ├── health-monitor.ts # Periodic agent health checks and auto-recovery
 │   ├── dispatcher.ts     # AI dispatcher: auto-spawn, workspace provisioning
 │   ├── preamble.ts       # System prompt generation for agents
 │   ├── tools.ts          # Fleet tools (fleet_send, fleet_status, fleet_set_goal)
@@ -129,7 +129,7 @@ packages/
 | `~/.thronglets/fleet/fleet-state.json` | Persisted agent states |
 | `~/.thronglets/fleet/sessions/` | Per-agent session logs (JSONL) |
 | `~/.thronglets/dispatch/` | Dispatcher workspace (auto-created) |
-| `./bridge.yaml` | Per-project config override (merged with global) |
+| `./config.yaml` | Per-project config override (merged with global) |
 
 `THRONGLETS_HOME` env var overrides `~/.thronglets`.
 
@@ -193,8 +193,8 @@ THRONGLETS_HOME=/path/to/home npx tsx src/index.ts
 | `dead` | Session permanently failed, needs kill + respawn |
 
 ### Health monitoring
-- Built-in heartbeat runs every 2 minutes
-- Auto-recovers dispatcher if it crashes
+- Agent health check runs every 30 seconds (stale session detection)
+- Dispatcher recovery check runs every 2 minutes (auto-restart if dead)
 - Dead agents auto-recover on next `send()` attempt
 - Cursor SDK sessions go stale after ~30min idle — this is normal, they reconnect
 
@@ -202,7 +202,7 @@ THRONGLETS_HOME=/path/to/home npx tsx src/index.ts
 | Symptom | Cause | Fix |
 |---------|-------|-----|
 | `Cannot GET /` | Dashboard not built | `cd packages/dashboard && npm install && npm run build` |
-| Dispatcher fails to start | Workspace not registered | Auto-fixed in v0.7.0+, or manually add to `workspaces.yaml` |
+| Dispatcher fails to start | Workspace not registered | Auto-provisioned on startup; check logs for `[dispatcher]` errors |
 | Agent stuck in "working" | Cursor SDK hang | Kill and respawn; SDK timeout (4.5min) should auto-recover |
 | `401 authentication` | Bad API key | Check `config.yaml` api_key value |
 | Bot ignores messages | `allowed_chats` mismatch | Verify your chat ID matches config |
@@ -246,28 +246,8 @@ cd packages/dashboard && npm install && npm run build && cd ../..
 
 All provisioning functions use `writeIfMissing` / `existsSync` guards — they only create files that don't exist yet. Existing user data is never overwritten.
 
-### Config directory migration
+### Config directory
 
-The config directory has been renamed over time:
+The canonical config directory is `~/.thronglets`. On startup, older directories (`~/.agent-bridge`, `~/.kenyalang`) are auto-migrated if found. Override with `THRONGLETS_HOME` env var.
 
-| Version | Directory |
-|---------|-----------|
-| v0.1–v0.3 | `~/.kenyalang` |
-| v0.4–v0.6 | `~/.agent-bridge` |
-| v0.7+ | `~/.thronglets` |
-
-**Auto-migration on startup:** If `~/.thronglets` doesn't exist but `~/.agent-bridge` or `~/.kenyalang` does, the service automatically renames the old directory to `~/.thronglets`. If the rename fails (permissions, cross-device), it falls back to the old path and logs a warning.
-
-**Manual override:** Set `THRONGLETS_HOME` env var to use any directory:
-```bash
-THRONGLETS_HOME=/home/user/.agent-bridge npm start
-```
-
-**Resolution order:**
-1. `$THRONGLETS_HOME` (env var — highest priority)
-2. `~/.thronglets` (if exists)
-3. `~/.agent-bridge` (legacy, auto-migrated)
-4. `~/.kenyalang` (legacy, auto-migrated)
-5. `~/.thronglets` (created fresh if nothing found)
-
-**All path references in the codebase** import `GLOBAL_CONFIG_DIR` from `config.ts` — there are no hardcoded `~/.thronglets` paths elsewhere. If you add new code that needs the config dir, always import `GLOBAL_CONFIG_DIR`.
+All path references in the codebase import `GLOBAL_CONFIG_DIR` from `config.ts` — if you add new code that needs the config dir, always use this constant.

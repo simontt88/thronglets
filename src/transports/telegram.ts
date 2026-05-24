@@ -3,6 +3,7 @@ import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
 import { join } from "path";
 import type { Transport, IncomingMessage, TransportOptions } from "./interface.js";
 import { GLOBAL_CONFIG_DIR } from "../config.js";
+import { splitText } from "../utils/chunk-text.js";
 
 const THRONGLETS_HOME = GLOBAL_CONFIG_DIR;
 const PID_FILE = join(THRONGLETS_HOME, "bridge.pid");
@@ -125,7 +126,7 @@ export class TelegramTransport implements Transport {
       return;
     }
 
-    const chunks = splitMessage(text, MAX_LEN - 100);
+    const chunks = splitText(text, MAX_LEN - 100);
     for (const chunk of chunks) {
       await this.bot.sendMessage(Number(chatId), chunk, { parse_mode: "Markdown" }).catch(() => {
         this.bot!.sendMessage(Number(chatId), chunk).catch(() => {});
@@ -138,18 +139,3 @@ export class TelegramTransport implements Transport {
   }
 }
 
-function splitMessage(text: string, maxLen: number): string[] {
-  const chunks: string[] = [];
-  let remaining = text;
-  while (remaining.length > 0) {
-    if (remaining.length <= maxLen) {
-      chunks.push(remaining);
-      break;
-    }
-    let splitIdx = remaining.lastIndexOf("\n", maxLen);
-    if (splitIdx < maxLen * 0.5) splitIdx = maxLen;
-    chunks.push(remaining.slice(0, splitIdx));
-    remaining = remaining.slice(splitIdx);
-  }
-  return chunks;
-}

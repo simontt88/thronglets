@@ -1,6 +1,7 @@
 import type { AgentState, WorkspaceEntry } from "./types.js";
 import type { CommsMode } from "../config.js";
 import { getToolInstructions } from "./tools.js";
+import { DISPATCHER_NAME } from "../utils/constants.js";
 
 interface FleetSnapshot {
   agents: AgentState[];
@@ -20,7 +21,7 @@ export function buildAgentPreamble(name: string, state: AgentState, sessionsDir:
         ``,
         `## Task completion protocol`,
         `When you finish a task (or hit a blocker), send a brief status report to the dispatcher:`,
-        `  [FLEET:fleet_send:{"agent":"_dispatcher","text":"DONE: <1-line summary>. Output: <key file paths>"}]`,
+        `  [FLEET:fleet_send:{"agent":"${DISPATCHER_NAME}","text":"DONE: <1-line summary>. Output: <key file paths>"}]`,
         `If you created or modified files that another throng may need, include the absolute paths in your report.`,
         `This lets the dispatcher chain follow-up tasks without asking you for status.`,
       ]
@@ -44,7 +45,7 @@ export function buildDispatcherPreamble(
   goal?: string,
 ): string {
   const agentSummary = status.agents
-    .filter((a) => a.name !== "_dispatcher")
+    .filter((a) => a.name !== DISPATCHER_NAME)
     .map((a) => {
       const titlePart = a.title ? ` [${a.title}]` : "";
       const parts = [`@${a.name}${titlePart}: ${a.runtime} · ws:${a.workspace} · ${a.status}`];

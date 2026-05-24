@@ -1,7 +1,7 @@
 <h1 align="center">Thronglets</h1>
 
 <p align="center">
-  <strong>Spawn a fleet of AI coding agents from Telegram. Each one gets a name, a pixel art avatar, and a workspace.</strong>
+  <strong>Spawn a fleet of AI coding agents from Telegram, Lark, or Discord. Each one gets a name, a pixel art avatar, and a workspace.</strong>
 </p>
 
 <p align="center">
@@ -31,7 +31,7 @@ Here's the thing: you already have great AI agents. Your Cursor session knows yo
 
 So we built the missing piece — a **dispatcher agent** that sits in its own workspace, sees the entire fleet, and routes tasks to the right throng. You just type into Telegram. The dispatcher figures out who's free, what workspace matches, and forwards your message. When you're not even talking, you can `/poke` the dispatcher and it'll look at its goal and start assigning work to idle agents on its own.
 
-Every throng gets a procedurally generated name and a pixel art face. Same name always produces the same creature. They have moods — grinding, waiting, sleeping, dead. It's cosmetic, but it makes you actually care when one of them dies.
+Every throng gets a procedurally generated name and a pixel art face. Same name always produces the same creature. They have moods — working, waiting, sleeping, dead. It's cosmetic, but it makes you actually care when one of them dies.
 
 ```
 You:        fix the tests          (no @mention — dispatcher handles it)
@@ -46,17 +46,26 @@ Not a new AI framework. No DSL, no "agentic workflow engine." Just identity, a d
 
 ## Quick Start
 
+**Prerequisites:** Node.js 18+, a [Telegram bot token](https://t.me/BotFather), a [Cursor API key](https://cursor.com/settings).
+
 ```bash
 git clone https://github.com/simontt88/thronglets.git
 cd thronglets && npm install
 ```
 
-Set your keys:
+Configure:
 
 ```bash
-export TELEGRAM_BOT_TOKEN="your-bot-token"       # from @BotFather
-export CURSOR_API_KEY="your-cursor-api-key"       # from cursor.com/settings
-export BRIDGE_WORKSPACE="/path/to/your/project"
+mkdir -p ~/.thronglets
+cp config.yaml.example ~/.thronglets/config.yaml
+```
+
+Edit `~/.thronglets/config.yaml` — set your `token`, `api_key`, and `allowed_chats` (get your chat ID from [@userinfobot](https://t.me/userinfobot)).
+
+Build the dashboard (optional):
+
+```bash
+cd packages/dashboard && npm install && npm run build && cd ../..
 ```
 
 Launch:
@@ -65,20 +74,20 @@ Launch:
 npm start
 ```
 
-Open Telegram → `/hatch` → watch your first throng hatch.
+Open Telegram → `/hatch` → watch your first throng hatch. The web dashboard is at `http://localhost:3847`.
 
 ## Features
 
 | Feature | Description |
 |---------|-------------|
 | **Fleet Management** | Spawn, kill, reconfigure agents on the fly. Each has its own session, workspace, and identity |
-| **Procedural Avatars** | Every agent gets a unique pixel art creature — deterministic from name, with mood animations (idle, working, happy, sleeping, dead) |
+| **Procedural Avatars** | Every agent gets a unique pixel art creature — deterministic from name, with mood animations (working, waiting, sleeping, dead) |
 | **Dispatcher Agent** | A dedicated agent with its own workspace that manages the fleet. Routes messages by workspace match. Has a persistent goal — `/poke` it and it autonomously assigns work to idle throngs |
 | **Comms Control** | Three modes — `swarm` (free chat), `hive` (hub-and-spoke), `leash` (human-only). Configurable Telegram visibility |
-| **Multi-Platform** | Telegram (primary), Lark/Feishu, Discord transports |
+| **Multi-Platform** | Telegram (primary), Lark/Feishu, Discord. Lark and Discord require their respective SDK (`npm install @larksuiteoapi/node-sdk` or `discord.js`) |
 | **Web Dashboard** | Real-time fleet visualization with session history, live output streaming, and agent state |
 | **Auto-Recovery** | Heartbeat monitoring, dead agent detection, automatic restart without manual intervention |
-| **Session Management** | Archive and recall past sessions per agent. Clear context without killing the creature |
+| **Session Logging** | Per-agent session logs (JSONL). Clear context without killing the creature |
 | **Workspace Isolation** | Each agent can be assigned to a different project directory |
 
 ## How It Works
@@ -100,7 +109,7 @@ Open Telegram → `/hatch` → watch your first throng hatch.
 
 The **dispatcher** is itself an agent with its own workspace. It receives every unaddressed message, sees the full fleet status (who's idle, who's working, which workspace each agent is in), and forwards tasks using `fleet_send`. It maintains a persistent goal — `/poke` it and it proactively assigns work to idle throngs.
 
-Each throng runs as a separate Cursor SDK agent session with full IDE capabilities.
+Each throng runs as a separate agent session (Cursor SDK, Claude Code, or Codex) with full IDE capabilities.
 
 ## Communication Modes
 
@@ -161,7 +170,6 @@ Create `~/.thronglets/config.yaml`:
 
 ```yaml
 transport: telegram
-workspace: /path/to/your/project
 
 telegram:
   token: ${TELEGRAM_BOT_TOKEN}
@@ -184,7 +192,22 @@ fleet:
     tool_calls: true
 ```
 
-See [`bridge.yaml.example`](bridge.yaml.example) for the full reference.
+See [`config.yaml.example`](config.yaml.example) for the full reference.
+
+### Environment Variables
+
+All config values can be overridden via environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TELEGRAM_BOT_TOKEN` | — | Telegram bot token (from [@BotFather](https://t.me/BotFather)) |
+| `CURSOR_API_KEY` | — | Cursor API key (from [cursor.com/settings](https://cursor.com/settings)) |
+| `THRONGLETS_HOME` | `~/.thronglets` | Config directory override |
+| `BRIDGE_PORT` | `3847` | Dashboard / API port |
+| `BRIDGE_TRANSPORT` | `telegram` | Transport: `telegram`, `lark`, `discord` |
+| `BRIDGE_WORKSPACE` | cwd | Default workspace path |
+| `CURSOR_MODEL` | `claude-sonnet-4-6` | Model for Cursor agents |
+| `TELEGRAM_ALLOWED_CHATS` | — | Comma-separated chat IDs |
 
 ### Supported Transports
 
@@ -202,18 +225,22 @@ src/
 │   ├── manager.ts    # Agent lifecycle + message routing
 │   ├── dispatcher.ts # AI-powered task router
 │   ├── tools.ts      # Inter-agent communication markers
-│   ├── event-bus.ts  # Real-time event pub/sub
+│   ├── preamble.ts   # System prompt generation
 │   ├── state.ts      # Persistent fleet state
-│   ├── naming.ts     # Procedural name generator
+│   ├── naming.ts     # Procedural name generator (auto-assigned)
 │   └── types.ts      # TypeScript interfaces
 ├── transports/       # Messaging platform adapters
 │   ├── telegram.ts
 │   ├── lark.ts
 │   └── discord.ts
 ├── runtimes/         # Agent SDK backends
-│   └── cursor.ts
+│   ├── interface.ts  # Runtime contract
+│   ├── cursor.ts     # Cursor SDK
+│   ├── claude-code.ts # Claude Code
+│   └── codex.ts      # OpenAI Codex
 ├── server/           # HTTP API + WebSocket
-│   └── http.ts
+│   ├── http.ts
+│   └── ws.ts
 ├── config.ts         # YAML + env var config loader
 └── index.ts          # Entrypoint
 
@@ -255,17 +282,18 @@ interface Runtime {
 | **Primary interface** | Telegram/Lark/Discord chat | CLI/GitHub | CLI/API |
 | **Agent identity** | Procedural names + pixel art avatars | Generic workers | Anonymous agents |
 | **Dispatch** | AI-powered smart routing | Task DAG planning | Graph-based DAG |
-| **Runtimes** | Cursor SDK | Claude Code + Codex + Aider | Model-agnostic |
+| **Runtimes** | Cursor SDK, Claude Code, Codex | Claude Code + Codex + Aider | Model-agnostic |
 | **Dashboard** | Real-time web UI with creature visualization | Terminal UI | Web observability |
 | **Setup** | `npm install` + env vars | `npm install` + config | Docker/Python |
 | **Focus** | Chat-first fleet management | CI/PR-oriented parallel coding | Business workflow automation |
 
 ## Roadmap
 
+- [x] **npm CLI** — `npx thronglets` global install
+- [x] **Docker image** — `docker build` support
 - [ ] **Memory layer** — persistent cross-session context per throng
 - [ ] **Slack transport** — Slack bot adapter
-- [ ] **npm global install** — `npx thronglets` one-liner setup
-- [ ] **Docker image** — zero-dependency deployment
+- [ ] **Session recall** — search and resume past agent sessions
 - [ ] **Plugin system** — custom tools and behaviors per throng
 
 ## Contributing

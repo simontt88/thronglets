@@ -3,12 +3,29 @@
   "version": "0.7.0",
   "description": "Thronglets — multi-agent fleet orchestrator for Telegram/Lark/Discord with Cursor, Claude Code, and Codex",
   "type": "module",
+  "license": "MIT",
+  "author": "Simon Ting <simontt19@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/simontt88/thronglets.git"
+  },
+  "homepage": "https://github.com/simontt88/thronglets",
+  "keywords": [
+    "telegram",
+    "cursor",
+    "multi-agent",
+    "ai-agents",
+    "fleet",
+    "orchestration",
+    "coding-agents"
+  ],
   "bin": {
     "thronglets": "./bin/thronglets.js"
   },
   "scripts": {
     "start": "node --import tsx src/index.ts",
     "dev": "node --watch --import tsx src/index.ts",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "publish:dashboard": "bash scripts/publish-dashboard.sh"
   },
@@ -30,6 +47,7 @@
     "@types/node": "^22.0.0",
     "@types/node-telegram-bot-api": "^0.64.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.7"
   }
 }

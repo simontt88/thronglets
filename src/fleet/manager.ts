@@ -3,9 +3,11 @@ import { join } from "path";
 import { EventEmitter } from "events";
 import type { AgentDef, BridgeConfig, RuntimeType, CommsMode } from "../config.js";
 import type { Runtime, AgentSession } from "../runtimes/interface.js";
-import { loadFleetState, saveFleetState, getSessionsDir, addWorkspace as addWorkspaceToState } from "./state.js";
+import { loadFleetState, saveFleetState, getSessionsDir, addWorkspace as addWorkspaceToState, removeWorkspace as removeWorkspaceFromState, renameWorkspace as renameWorkspaceInState, loadWorkspaces } from "./state.js";
 import { generateUniqueName } from "./naming.js";
 import { buildAgentPreamble, buildDispatcherPreamble } from "./preamble.js";
+import { DISPATCHER_NAME } from "../utils/constants.js";
+import { HealthMonitor, SEND_TIMEOUT_MS, SESSION_MAX_AGE_MS } from "./health-monitor.js";
 import type { AgentState, AgentStatus, FleetEvent, FleetEventType, FleetState, QueuedMessage, MessageSender, WorkspaceEntry } from "./types.js";
 export type { WorkspaceEntry } from "./types.js";
 
@@ -26,7 +28,6 @@ export class FleetEventBus extends EventEmitter {
   }
 }
 
-const SESSION_MAX_AGE_MS = 30 * 60 * 1000; // Close sessions idle for >30 minutes
 const TRAITS = ["curious", "sleepy", "eager", "chaotic", "calm", "skeptical"] as const;
 const ADJECTIVES = ["playful", "intense", "gentle", "wild", "stoic", "witty", "shy", "bold"] as const;
 
@@ -59,8 +60,6 @@ export interface FleetManagerConfig {
   commsMode: CommsMode;
 }
 
-const SEND_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes max per message
-const HEALTH_CHECK_INTERVAL_MS = 30 * 1000; // check every 30s
 
 export type ReplyRoutingCallback = (fromAgent: string, toAgent: string, reply: string) => void;
 export type PeerMessageCallback = (fromAgent: string, toAgent: string, direction: "sent" | "replied") => void;
@@ -70,7 +69,7 @@ export class FleetManager {
   private agents = new Map<string, LiveAgent>();
   private bus: FleetEventBus;
   private config: FleetManagerConfig;
-  private healthInterval: ReturnType<typeof setInterval> | null = null;
+  private healthMonitor: HealthMonitor;
   private postReplyHook: ((agentName: string, reply: string, sender: MessageSender) => Promise<string>) | null = null;
   private replyRoutingCallback: ReplyRoutingCallback | null = null;
   private peerMessageCallback: PeerMessageCallback | null = null;
@@ -79,7 +78,12 @@ export class FleetManager {
   constructor(bus: FleetEventBus, config: FleetManagerConfig) {
     this.bus = bus;
     this.config = config;
-    this.startHealthCheck();
+    this.healthMonitor = new HealthMonitor(
+      bus,
+      () => this.agents as Map<string, any>,
+      () => this.persistState(),
+    );
+    this.healthMonitor.start();
   }
 
   setPostReplyHook(hook: (agentName: string, reply: string, sender: MessageSender) => Promise<string>): void {
@@ -98,74 +102,8 @@ export class FleetManager {
     this.dispatcherBroadcastCallback = callback;
   }
 
-  private startHealthCheck(): void {
-    this.healthInterval = setInterval(() => this.checkAgentHealth(), HEALTH_CHECK_INTERVAL_MS);
-  }
-
-  private checkAgentHealth(): void {
-    const now = Date.now();
-    let stateChanged = false;
-    for (const [name, live] of this.agents) {
-      if (live.state.status === "working" && live.state.lastActivity) {
-        const elapsed = now - new Date(live.state.lastActivity).getTime();
-        if (elapsed > SEND_TIMEOUT_MS + 30_000) {
-          console.log(`[fleet] ${name}: unresponsive for ${Math.round(elapsed / 60_000)}min — auto-recovering`);
-          live.processing = false;
-          if (live.session) {
-            try { live.session.close(); } catch {}
-            live.session = null;
-          }
-
-          // Auto-nudge: transition dead → sleeping instead of staying dead
-          // Agent will reconnect automatically on next message
-          live.state.status = "sleeping";
-          live.state.inferred = `auto-recovered — was unresponsive for ${Math.round(elapsed / 60_000)}min`;
-          this.bus.publish("status_change", name, live.sessionId, { status: "sleeping" });
-          this.logToSession(name, live.sessionId, {
-            type: "health_check",
-            status: "auto_recovered",
-            elapsed_ms: elapsed,
-          });
-          stateChanged = true;
-        }
-      }
-
-      // Auto-recover dead/error → sleeping (no need to stay stuck)
-      if (live.state.status === "dead" || live.state.status === "error") {
-        console.log(`[fleet] ${name}: auto-recovering from ${live.state.status} → sleeping`);
-        if (live.session) {
-          try { live.session.close(); } catch {}
-          live.session = null;
-        }
-        live.processing = false;
-        live.state.status = "sleeping";
-        live.state.inferred = `auto-recovered from ${live.state.status} — will reconnect on next message`;
-        this.bus.publish("status_change", name, live.sessionId, { status: "sleeping" });
-        stateChanged = true;
-      }
-
-      // Transition waiting → sleeping when session has been idle past max age
-      if (live.state.status === "waiting" && live.session && live.state.lastActivity) {
-        const idleMs = now - new Date(live.state.lastActivity).getTime();
-        if (idleMs > SESSION_MAX_AGE_MS) {
-          try { live.session.close(); } catch {}
-          live.session = null;
-          live.state.status = "sleeping";
-          live.state.inferred = `sleeping — idle for ${Math.round(idleMs / 60_000)}min, will reconnect on next message`;
-          this.bus.publish("status_change", name, live.sessionId, { status: "sleeping" });
-          stateChanged = true;
-          console.log(`[fleet] ${name}: waiting → sleeping after ${Math.round(idleMs / 60_000)}min`);
-        }
-      }
-    }
-    if (stateChanged) this.persistState();
-  }
-
   stopHealthCheck(): void {
-    if (this.healthInterval) {
-      clearInterval(this.healthInterval);
-      this.healthInterval = null;
-    }
+    this.healthMonitor.stop();
   }
 
   get eventBus(): FleetEventBus {
@@ -205,13 +143,32 @@ export class FleetManager {
     return generateUniqueName(this.listAgents());
   }
 
-  renameWorkspace(oldAlias: string, newAlias: string): void {
+  renameWorkspace(oldAlias: string, newAlias: string): string {
+    const result = renameWorkspaceInState(oldAlias, newAlias);
+    if (result.startsWith("Error") || result.includes("not found")) return result;
     for (const [, live] of this.agents) {
       if (live.state.workspace === oldAlias) {
         live.state.workspace = newAlias;
       }
     }
+    const idx = this.config.workspaces.findIndex((w) => w.alias === oldAlias);
+    if (idx >= 0) this.config.workspaces[idx].alias = newAlias;
     this.persistState();
+    this.bus.publish("status_change", "_system", "", { event: "workspace_renamed", oldAlias, newAlias });
+    return result;
+  }
+
+  removeWorkspace(alias: string): string {
+    const result = removeWorkspaceFromState(alias);
+    if (result.includes("not found")) return result;
+    const idx = this.config.workspaces.findIndex((w) => w.alias === alias);
+    if (idx >= 0) this.config.workspaces.splice(idx, 1);
+    this.bus.publish("status_change", "_system", "", { event: "workspace_removed", alias });
+    return result;
+  }
+
+  listWorkspaces(): WorkspaceEntry[] {
+    return this.config.workspaces;
   }
 
   setTitle(name: string, title: string): string {
@@ -224,7 +181,7 @@ export class FleetManager {
   }
 
   private getDispatcherWorkspacePath(): string | null {
-    const disp = this.agents.get("_dispatcher");
+    const disp = this.agents.get(DISPATCHER_NAME);
     return disp?.state.workspacePath || null;
   }
 
@@ -470,7 +427,7 @@ export class FleetManager {
 
         // When dispatcher replies to an agent, broadcast to user (Telegram)
         // so the user sees the dispatcher's summary/status updates
-        if (name === "_dispatcher" && this.dispatcherBroadcastCallback && reply!.trim()) {
+        if (name === DISPATCHER_NAME && this.dispatcherBroadcastCallback && reply!.trim()) {
           this.dispatcherBroadcastCallback(reply!, sender as string);
         }
       }
@@ -499,11 +456,11 @@ export class FleetManager {
 
       // Forward error to dispatcher — but ONLY if dispatcher is healthy
       // Avoids cascading failure when dispatcher itself is down
-      if (name !== "_dispatcher") {
-        const dispLive = this.agents.get("_dispatcher");
+      if (name !== DISPATCHER_NAME) {
+        const dispLive = this.agents.get(DISPATCHER_NAME);
         if (dispLive && dispLive.state.status !== "error" && dispLive.state.status !== "dead") {
           const briefErr = errMsg.length > 200 ? errMsg.slice(0, 200) + "…" : errMsg;
-          this.send("_dispatcher", `Agent "${name}" encountered an error: ${briefErr}\nStatus: ${live.state.status}. Please advise or reassign the task.`, name)
+          this.send(DISPATCHER_NAME, `Agent "${name}" encountered an error: ${briefErr}\nStatus: ${live.state.status}. Please advise or reassign the task.`, name)
             .catch((e) => console.warn(`[fleet] failed to notify dispatcher of ${name} error: ${(e as Error).message?.slice(0, 60)}`));
         } else {
           console.warn(`[fleet] ${name}: error occurred but dispatcher is ${dispLive?.state.status ?? "absent"} — skipping error forwarding`);
@@ -566,7 +523,7 @@ export class FleetManager {
     if (!live) return "";
     const sessionsDir = getSessionsDir(name);
 
-    if (name === "_dispatcher") {
+    if (name === DISPATCHER_NAME) {
       return buildDispatcherPreamble(this.getStatus(), this.config.workspaces, sessionsDir, this.getGoal());
     }
 

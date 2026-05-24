@@ -4,6 +4,7 @@ import type { Transport } from "../transports/interface.js";
 import { TelegramTransport } from "../transports/telegram.js";
 import { startDispatcher, getDispatcherConfig, DISPATCHER_AGENT_NAME } from "../fleet/dispatcher.js";
 import { sendNewPrompt, sendChangePrompt, sendKillPrompt, sendClearPrompt } from "../transports/telegram-buttons.js";
+import { POKE_MESSAGE_WITH_GOAL, POKE_MESSAGE_NO_GOAL } from "../utils/constants.js";
 
 const DISPATCHER_ALIASES = new Set(["D", "d", "dispatch", "dispatcher", "orix"]);
 
@@ -273,9 +274,7 @@ async function handleCommand(
         return;
       }
       const goal = fleet.getGoal();
-      const pokeMsg = goal
-        ? `[POKE] The user wants you to keep the fleet working. Review the current goal, check fleet status, and assign/reassign tasks to idle agents based on what needs to be done next. Be autonomous — don't ask, just dispatch.`
-        : `[POKE] The user poked you. There is no goal set yet — ask the user what the fleet should focus on, then set it with fleet_set_goal.`;
+      const pokeMsg = goal ? POKE_MESSAGE_WITH_GOAL : POKE_MESSAGE_NO_GOAL;
       await transport.sendReply(chatId, "👉 Poking dispatcher...");
       await sendToAgent(chatId, DISPATCHER_AGENT_NAME, pokeMsg, transport, fleet, "dispatcher");
       return;

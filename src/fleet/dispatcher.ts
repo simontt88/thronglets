@@ -4,10 +4,9 @@ import type { BridgeConfig, RuntimeType } from "../config.js";
 import { GLOBAL_CONFIG_DIR } from "../config.js";
 import { provisionDispatcherWorkspace } from "./workspace-init.js";
 import { addWorkspace } from "./state.js";
+import { DISPATCHER_NAME } from "../utils/constants.js";
 import { existsSync, mkdirSync, cpSync } from "fs";
 import { join } from "path";
-
-const DISPATCHER_NAME = "_dispatcher";
 const DEFAULT_DISPATCH_DIR = join(GLOBAL_CONFIG_DIR, "dispatch");
 
 export interface DispatcherConfig {

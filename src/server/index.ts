@@ -46,7 +46,7 @@ export function startServer(
 ): { port: number } {
   const port = parseInt(process.env.BRIDGE_PORT || "") || DEFAULT_PORT;
 
-  const app = createHttpApp(fleet, config, workspaces);
+  const app = createHttpApp(fleet, config);
 
   // Serve chill mode (thronglets-viz) static files
   const chillDir = findChillDir();
