@@ -14,6 +14,18 @@ interface FleetSnapshot {
 export function buildAgentPreamble(name: string, state: AgentState, sessionsDir: string, commsMode: CommsMode = "hive"): string {
   const titleStr = state.title ? ` — ${state.title}` : "";
   const personality = state.personality || "curious";
+
+  const autoReport = commsMode !== "leash"
+    ? [
+        ``,
+        `## Task completion protocol`,
+        `When you finish a task (or hit a blocker), send a brief status report to the dispatcher:`,
+        `  [FLEET:fleet_send:{"agent":"_dispatcher","text":"DONE: <1-line summary>. Output: <key file paths>"}]`,
+        `If you created or modified files that another throng may need, include the absolute paths in your report.`,
+        `This lets the dispatcher chain follow-up tasks without asking you for status.`,
+      ]
+    : [];
+
   return [
     `[SYSTEM] Your name is "${name}"${titleStr}. You ARE ${name}. Never refer to yourself in third person — you are the one doing the work, not delegating to yourself.`,
     `Personality: ${personality}.`,
@@ -21,6 +33,7 @@ export function buildAgentPreamble(name: string, state: AgentState, sessionsDir:
     `Messages from other agents are prefixed [from:name]. Messages from the dispatcher are [from:_dispatcher]. Messages from the human master have no prefix.`,
     "",
     getToolInstructions(false, commsMode),
+    ...autoReport,
   ].join("\n");
 }
 
@@ -33,7 +46,7 @@ export function buildDispatcherPreamble(
   const agentSummary = status.agents
     .filter((a) => a.name !== "_dispatcher")
     .map((a) => {
-      const titlePart = a.title ? ` (${a.title})` : "";
+      const titlePart = a.title ? ` [${a.title}]` : "";
       const parts = [`@${a.name}${titlePart}: ${a.runtime} · ws:${a.workspace} · ${a.status}`];
       if (a.sessionName) parts.push(`「${a.sessionName}」`);
       if (a.inferred && a.status === "working") parts.push(`(${a.inferred})`);
@@ -58,9 +71,15 @@ export function buildDispatcherPreamble(
     `4. Report back briefly`,
     ``,
     `## Routing rules`,
-    `- Match by workspace first, then split large tasks across throngs.`,
+    `- **Match by workspace first**: each workspace is a codebase — route to the throng whose workspace matches the task's project.`,
+    `- **Then by title/role**: if a throng has a title (shown as [title] in fleet list), it indicates specialization — prefer it for matching tasks.`,
+    `- **Then by status**: prefer "waiting" throngs over "working" ones. Never interrupt a working throng unless urgent.`,
+    `- Split large tasks across throngs when they span different workspaces.`,
     `- Never do coding work yourself — always delegate.`,
-    `- If no throngs available, suggest hatching one.`,
+    `- If no throngs available for a workspace, suggest hatching one.`,
+    `- When spawning: NEVER specify a name. Names are auto-assigned by the system.`,
+    `- When a throng reports "DONE: ...", acknowledge it and chain the next step if the goal requires it.`,
+    `- If a throng reports file paths, forward those paths to the next throng that needs them.`,
     ``,
     getToolInstructions(true),
     ``,

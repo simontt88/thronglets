@@ -18,6 +18,7 @@ const TOOLS: Record<string, ToolDef> = {
     async execute(args, agentName, fleet, _workspaces, commsMode) {
       const target = args.agent as string;
       const text = args.text as string;
+      const files = args.files as string[] | undefined;
       if (!target || !text) return "Error: fleet_send requires 'agent' and 'text'";
       if (target === agentName) return "Error: cannot send to yourself";
       if (!fleet.hasAgent(target)) return `Error: agent "${target}" not found`;
@@ -32,7 +33,12 @@ const TOOLS: Record<string, ToolDef> = {
         return `Error: cannot send to @${target} — comms mode is 'hive'. You can only report to the dispatcher.`;
       }
 
-      fleet.send(target, text, agentName).then((reply) => {
+      let fullText = text;
+      if (files && files.length > 0) {
+        fullText += `\n\n📎 Files: ${files.join(", ")}`;
+      }
+
+      fleet.send(target, fullText, agentName).then((reply) => {
         console.log(`[fleet-tools] ${agentName} → ${target}: delivered, got ${reply.length} char reply`);
       }).catch((err) => {
         console.warn(`[fleet-tools] ${agentName} → ${target}: send failed: ${(err as Error).message?.slice(0, 60)}`);
@@ -57,11 +63,10 @@ const TOOLS: Record<string, ToolDef> = {
   fleet_spawn: {
     permission: "dispatcher",
     async execute(args, _agentName, fleet) {
-      const name = args.name as string;
-      const runtime = args.runtime as string;
+      const runtime = (args.runtime as string) || "cursor";
       const workspace = args.workspace as string;
-      if (!name || !runtime || !workspace) return "Error: fleet_spawn requires 'name', 'runtime', 'workspace'";
-      const result = await fleet.spawn(name, runtime as "cursor" | "claude-code" | "codex", workspace);
+      if (!workspace) return "Error: fleet_spawn requires 'runtime' and 'workspace'";
+      const result = await fleet.spawn(undefined, runtime as "cursor", workspace);
       return result;
     },
   },
@@ -182,7 +187,8 @@ export function getToolInstructions(isDispatcher: boolean, commsMode: CommsMode 
 You can execute fleet operations by including markers in your reply:
 
 - Send message to agent: [FLEET:fleet_send:{"agent":"name","text":"message"}]
-- Spawn new agent: [FLEET:fleet_spawn:{"name":"agentname","runtime":"cursor","workspace":"alias"}]
+- Send with file paths: [FLEET:fleet_send:{"agent":"name","text":"message","files":["/abs/path/file.ts"]}]
+- Spawn new agent: [FLEET:fleet_spawn:{"runtime":"cursor","workspace":"alias"}]  (name is auto-assigned — do NOT pick a name)
 - Kill agent: [FLEET:fleet_kill:{"name":"agentname"}]
 - Clear agent session: [FLEET:fleet_clear:{"name":"agentname"}]
 - Get fleet status: [FLEET:fleet_status:{}]
@@ -214,8 +220,10 @@ All communication goes through the human. Focus on your assigned task.
 You can communicate with the dispatcher only (not other agents directly):
 
 - Send message to dispatcher: [FLEET:fleet_send:{"agent":"_dispatcher","text":"message"}]
+- Send with file paths: [FLEET:fleet_send:{"agent":"_dispatcher","text":"message","files":["/abs/path/file.ts"]}]
 - Get fleet status: [FLEET:fleet_status:{}]
 
+When reporting task completion, include any file paths the dispatcher might forward to other throngs.
 You CANNOT send messages to other agents — route through the dispatcher.
 Include the marker anywhere in your reply text — it will be stripped before showing to the user.
 `;
@@ -227,8 +235,10 @@ Include the marker anywhere in your reply text — it will be stripped before sh
 You can communicate with other agents by including markers in your reply:
 
 - Send message to another agent: [FLEET:fleet_send:{"agent":"name","text":"message"}]
+- Send with file paths: [FLEET:fleet_send:{"agent":"name","text":"message","files":["/abs/path/file.ts"]}]
 - Get fleet status: [FLEET:fleet_status:{}]
 
+Use the "files" field to share file paths when collaborating across workspaces.
 The message will be queued and the other agent will see it tagged with your name.
 You CANNOT spawn, kill, or clear other agents — only the dispatcher can.
 Include the marker anywhere in your reply text — it will be stripped before showing to the user.

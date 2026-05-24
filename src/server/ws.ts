@@ -69,7 +69,7 @@ export function attachWebSocket(
           const model = msg.model as string | undefined;
           const rt = (runtime || "cursor") as RuntimeType;
           const ws_alias = workspace || workspaces[0]?.alias || "cwd";
-          const result = await fleet.spawn(name as string, rt, ws_alias, model);
+          const result = await fleet.spawn(name || undefined, rt, ws_alias, model);
           ws.send(JSON.stringify({ type: "spawn_result", message: result }));
           break;
         }

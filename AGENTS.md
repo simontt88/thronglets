@@ -101,7 +101,7 @@ src/
 │   ├── tools.ts          # Fleet tools (fleet_send, fleet_status, fleet_set_goal)
 │   ├── state.ts          # File-based persistence (fleet-state.json, workspaces.yaml)
 │   ├── workspace-init.ts # Auto-provision agent workspace directories
-│   ├── naming.ts         # Procedural thronglet name generation
+│   ├── naming.ts         # Procedural name generation (auto-assigned, never user-chosen)
 │   └── types.ts          # TypeScript interfaces
 ├── runtimes/
 │   ├── cursor.ts         # Cursor SDK integration (primary runtime)
@@ -132,6 +132,12 @@ packages/
 | `./bridge.yaml` | Per-project config override (merged with global) |
 
 `THRONGLETS_HOME` env var overrides `~/.thronglets`.
+
+## Throng naming
+
+Names are **always auto-assigned** by the procedural generator in `naming.ts`. Neither users nor the dispatcher choose names — the system generates a unique name on every spawn. This ensures naming consistency across all entry points (Telegram, dashboard, dispatcher `fleet_spawn`, API).
+
+The `fleet_spawn` tool does **not** accept a `name` parameter. If you are the dispatcher, spawn with `{"runtime":"cursor","workspace":"alias"}` only.
 
 ## Fleet communication modes
 

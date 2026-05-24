@@ -50,9 +50,6 @@ export function SpawnDialog() {
     if (step > 0) { setStep(step - 1); setError(""); }
   };
 
-  const reroll = () => {
-    setName(generateUniqueName(agents.map((a) => a.name)));
-  };
 
   const handleSpawn = async () => {
     setSpawning(true);
@@ -138,14 +135,7 @@ export function SpawnDialog() {
               <div className="spawn-summary">
                 <div className="spawn-sum-row">
                   <span className="sum-k">name</span>
-                  <span className="sum-v">
-                    {name}
-                    <button className="reroll-btn" onClick={reroll} title="Re-roll name">🎲</button>
-                  </span>
-                </div>
-                <div className="spawn-sum-row">
-                  <span className="sum-k">trait</span>
-                  <span className="sum-v">{previewSpec.trait}</span>
+                  <span className="sum-v">{name} <span style={{opacity:0.5, fontSize:"0.85em"}}>(auto)</span></span>
                 </div>
                 <div className="spawn-sum-row">
                   <span className="sum-k">runtime</span>
