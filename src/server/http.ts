@@ -5,7 +5,7 @@ import type { FleetManager } from "../fleet/index.js";
 import type { BridgeConfig, RuntimeType } from "../config.js";
 import type { WorkspaceEntry } from "../fleet/index.js";
 import { readdirSync, readFileSync, existsSync } from "fs";
-import { getSessionsDir, addWorkspace, removeWorkspace, loadWorkspaces } from "../fleet/state.js";
+import { getSessionsDir, addWorkspace, removeWorkspace, renameWorkspace, loadWorkspaces } from "../fleet/state.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, "../../package.json"), "utf-8"));
@@ -200,6 +200,26 @@ export function createHttpApp(
     const updated = loadWorkspaces();
     workspaces.length = 0;
     workspaces.push(...updated);
+    res.json({ message: result, workspaces: updated });
+  });
+
+  app.patch("/api/workspaces/:alias", (req, res) => {
+    const oldAlias = req.params.alias;
+    const { alias: newAlias } = req.body;
+    if (!newAlias) {
+      res.status(400).json({ error: "alias is required" });
+      return;
+    }
+    const result = renameWorkspace(oldAlias, newAlias);
+    if (result.startsWith("Error")) {
+      res.status(400).json({ error: result });
+      return;
+    }
+    // Update in-memory workspace list and any agents using the old alias
+    const updated = loadWorkspaces();
+    workspaces.length = 0;
+    workspaces.push(...updated);
+    fleet.renameWorkspace(oldAlias, newAlias);
     res.json({ message: result, workspaces: updated });
   });
 

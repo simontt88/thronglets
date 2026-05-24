@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { useFleetStore, deleteWorkspace } from "../stores/fleet";
+import { useState, useRef, useEffect } from "react";
+import { useFleetStore, deleteWorkspace, renameWorkspace } from "../stores/fleet";
 import { Icon } from "./Icons";
 import { PixelThronglet } from "./PixelThronglet";
 import { generateThronglet } from "../lib/thronglet";
@@ -8,6 +8,13 @@ export function TopBar() {
   const { agents, workspaces, currentWorkspace, setWorkspace, theme, setTheme, toggleDispatcher, mode, setMode } = useFleetStore();
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState("");
+  const [editingWs, setEditingWs] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const editRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editingWs && editRef.current) editRef.current.focus();
+  }, [editingWs]);
 
   const wsGroups = [
     { alias: "all", name: "All", path: "", count: agents.length },
@@ -45,12 +52,41 @@ export function TopBar() {
             key={ws.alias}
             className={"ws-tab" + (currentWorkspace === ws.alias ? " active" : "")}
             onClick={() => setWorkspace(ws.alias)}
-            title={ws.path || ws.name}
+            onDoubleClick={() => {
+              if (ws.alias !== "all" && ws.alias !== "dispatch") {
+                setEditingWs(ws.alias);
+                setEditValue(ws.alias);
+              }
+            }}
+            title={ws.path ? `${ws.path} (double-click to rename)` : ws.name}
           >
             <span className="ws-dot" style={{ background: ws.alias === "all" ? "var(--t-3)" : undefined }}></span>
-            <span>{ws.name}</span>
+            {editingWs === ws.alias ? (
+              <input
+                ref={editRef}
+                className="ws-rename-input"
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onKeyDown={async (e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter") {
+                    const trimmed = editValue.trim();
+                    if (trimmed && trimmed !== ws.alias) {
+                      await renameWorkspace(ws.alias, trimmed);
+                    }
+                    setEditingWs(null);
+                  } else if (e.key === "Escape") {
+                    setEditingWs(null);
+                  }
+                }}
+                onBlur={() => setEditingWs(null)}
+                onClick={(e) => e.stopPropagation()}
+              />
+            ) : (
+              <span>{ws.name}</span>
+            )}
             <span className="ws-count">{ws.count}</span>
-            {ws.alias !== "all" && (
+            {ws.alias !== "all" && ws.alias !== "dispatch" && (
               <span
                 className="ws-delete"
                 title={`Remove ${ws.alias}`}

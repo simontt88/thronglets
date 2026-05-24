@@ -201,14 +201,26 @@ THRONGLETS_HOME=/path/to/home npx tsx src/index.ts
 | `401 authentication` | Bad API key | Check `config.yaml` api_key value |
 | Bot ignores messages | `allowed_chats` mismatch | Verify your chat ID matches config |
 
-### Adding a new workspace
-Via Telegram: handled through `/new` flow.
-Via API:
+### Workspace management
+
+**Dispatcher workspace** is always at `~/.thronglets/dispatch/` with alias `dispatch`. This is hardcoded — it cannot be renamed or moved via config. The dispatcher should never run in a user project directory.
+
+**Add a workspace:**
 ```bash
 curl -X POST http://localhost:3847/api/workspaces \
   -H "Content-Type: application/json" \
   -d '{"alias": "myproject", "path": "/path/to/project"}'
 ```
+
+**Rename a workspace alias:**
+```bash
+curl -X PATCH http://localhost:3847/api/workspaces/old-alias \
+  -H "Content-Type: application/json" \
+  -d '{"alias": "new-alias"}'
+```
+Renaming updates all agents using that workspace. The `dispatch` alias cannot be renamed.
+
+**Dashboard:** Double-click a workspace tab to rename it inline. The `dispatch` and `All` tabs are locked.
 
 ### Upgrading
 

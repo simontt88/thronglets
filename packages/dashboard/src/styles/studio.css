@@ -1070,6 +1070,15 @@ strong { font-weight: 700; color: var(--t-1); }
 .ws-tab:hover .ws-delete { display: inline-flex; align-items: center; justify-content: center; }
 .ws-tab .ws-delete:hover { background: rgba(224,85,85,0.15); color: var(--st-error); }
 
+/* Workspace rename inline input */
+.ws-rename-input {
+  width: 80px; height: 20px; padding: 0 4px;
+  font-size: inherit; font-family: inherit; font-weight: inherit;
+  background: var(--bg-0); color: var(--t-1);
+  border: 1px solid var(--st-working); border-radius: 4px;
+  outline: none;
+}
+
 /* Workspace confirm dialog */
 .ws-confirm-overlay {
   position: fixed; inset: 0; z-index: 9999;

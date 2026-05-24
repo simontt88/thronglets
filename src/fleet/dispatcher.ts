@@ -6,7 +6,6 @@ import { provisionDispatcherWorkspace } from "./workspace-init.js";
 import { addWorkspace } from "./state.js";
 import { existsSync, mkdirSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
 
 const DISPATCHER_NAME = "_dispatcher";
 const DEFAULT_DISPATCH_DIR = join(GLOBAL_CONFIG_DIR, "dispatch");
@@ -15,7 +14,6 @@ export interface DispatcherConfig {
   enabled: boolean;
   runtime: RuntimeType;
   model?: string;
-  workspace?: string;
 }
 
 export function getDispatcherConfig(config: BridgeConfig): DispatcherConfig {
@@ -27,7 +25,6 @@ export function getDispatcherConfig(config: BridgeConfig): DispatcherConfig {
     enabled: raw.enabled !== false,
     runtime: raw.runtime || "cursor",
     model: raw.model,
-    workspace: raw.workspace,
   };
 }
 
@@ -48,17 +45,12 @@ export async function startDispatcher(
     return true;
   }
 
-  const wsAlias = dc.workspace || "dispatch";
+  const wsAlias = "dispatch";
+  const wsPath = DEFAULT_DISPATCH_DIR;
 
   let wsEntry = workspaces.find((w) => w.alias === wsAlias);
 
-  // Auto-create dispatcher workspace if not registered
   if (!wsEntry) {
-    // If workspace value looks like a path, use it; otherwise create under THRONGLETS_HOME
-    const wsPath = dc.workspace && (dc.workspace.startsWith("/") || dc.workspace.startsWith("~"))
-      ? dc.workspace.replace(/^~/, homedir())
-      : DEFAULT_DISPATCH_DIR;
-
     if (!existsSync(wsPath)) {
       mkdirSync(wsPath, { recursive: true });
       console.log(`[dispatcher] created workspace directory: ${wsPath}`);
@@ -67,7 +59,11 @@ export async function startDispatcher(
     addWorkspace(wsAlias, wsPath);
     workspaces.push({ alias: wsAlias, path: wsPath });
     wsEntry = workspaces[workspaces.length - 1];
-    console.log(`[dispatcher] auto-registered workspace: ${wsAlias} → ${wsPath}`);
+    console.log(`[dispatcher] registered workspace: ${wsAlias} → ${wsPath}`);
+  } else if (wsEntry.path !== wsPath) {
+    wsEntry.path = wsPath;
+    addWorkspace(wsAlias, wsPath);
+    console.log(`[dispatcher] corrected workspace path: ${wsAlias} → ${wsPath}`);
   }
 
   // Provision AGENTS.md, memory/, tools/ if missing

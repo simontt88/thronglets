@@ -205,6 +205,15 @@ export class FleetManager {
     return generateUniqueName(this.listAgents());
   }
 
+  renameWorkspace(oldAlias: string, newAlias: string): void {
+    for (const [, live] of this.agents) {
+      if (live.state.workspace === oldAlias) {
+        live.state.workspace = newAlias;
+      }
+    }
+    this.persistState();
+  }
+
   setTitle(name: string, title: string): string {
     const live = this.agents.get(name);
     if (!live) return `"${name}" not found.`;

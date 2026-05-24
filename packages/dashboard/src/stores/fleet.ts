@@ -430,6 +430,27 @@ export async function addWorkspace(alias: string, path: string) {
   }
 }
 
+export async function renameWorkspace(oldAlias: string, newAlias: string): Promise<{ ok: boolean; message: string }> {
+  try {
+    const res = await fetch(`${serverBase.http}/api/workspaces/${encodeURIComponent(oldAlias)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ alias: newAlias }),
+    });
+    const data = await res.json();
+    if (!res.ok) return { ok: false, message: data.error || "Failed to rename" };
+    if (data.workspaces) {
+      const store = useFleetStore.getState();
+      useFleetStore.setState({ workspaces: data.workspaces });
+      if (store.currentWorkspace === oldAlias) {
+        useFleetStore.getState().setWorkspace(newAlias);
+      }
+    }
+    await fetchFleet();
+    return { ok: true, message: data.message };
+  } catch { return { ok: false, message: "Network error" }; }
+}
+
 export async function deleteWorkspace(alias: string): Promise<{ ok: boolean; message: string; agents?: string[] }> {
   try {
     const res = await fetch(`${serverBase.http}/api/workspaces/${encodeURIComponent(alias)}`, { method: "DELETE" });

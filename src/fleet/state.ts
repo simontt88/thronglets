@@ -99,3 +99,17 @@ export function removeWorkspace(alias: string): string {
   saveWorkspaces(workspaces);
   return `Workspace "${alias}" removed`;
 }
+
+export function renameWorkspace(oldAlias: string, newAlias: string): string {
+  if (!newAlias.trim()) return "Error: new alias cannot be empty";
+  if (oldAlias === "dispatch") return "Error: cannot rename the dispatcher workspace";
+
+  const workspaces = loadWorkspaces();
+  const entry = workspaces.find((w) => w.alias === oldAlias);
+  if (!entry) return `Workspace "${oldAlias}" not found`;
+  if (workspaces.find((w) => w.alias === newAlias)) return `Workspace "${newAlias}" already exists`;
+
+  entry.alias = newAlias;
+  saveWorkspaces(workspaces);
+  return `Workspace renamed: "${oldAlias}" → "${newAlias}"`;
+}
