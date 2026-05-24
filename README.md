@@ -40,19 +40,18 @@
   </tr>
 </table>
 
-<details>
-<summary><strong>🎬 Demo videos</strong> (click to expand)</summary>
-<br>
-
-**Dashboard walkthrough** — studio mode, agent chat, live output
-
-[![Dashboard demo](docs/assets/video-thumb-dashboard.png)](https://youtu.be/yyB6XmVZJhw)
-
-**Telegram bot** — spawning, routing, fleet management
-
-[![Telegram demo](docs/assets/video-thumb-telegram.png)](https://youtube.com/shorts/20UeTurF2HM)
-
-</details>
+<table>
+  <tr>
+    <td width="65%">
+      <a href="https://youtu.be/yyB6XmVZJhw"><img src="docs/assets/video-thumb-dashboard.png" alt="Dashboard demo" width="100%" /></a>
+      <p align="center"><sub>Dashboard walkthrough — <a href="https://youtu.be/yyB6XmVZJhw">watch on YouTube</a></sub></p>
+    </td>
+    <td width="35%">
+      <a href="https://youtube.com/shorts/20UeTurF2HM"><img src="docs/assets/video-thumb-telegram.png" alt="Telegram demo" width="100%" /></a>
+      <p align="center"><sub>Telegram bot — <a href="https://youtube.com/shorts/20UeTurF2HM">watch on YouTube</a></sub></p>
+    </td>
+  </tr>
+</table>
 
 ## Why "Thronglets"?
 
