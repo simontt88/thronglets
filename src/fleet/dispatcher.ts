@@ -4,7 +4,7 @@ import type { BridgeConfig, RuntimeType } from "../config.js";
 import { GLOBAL_CONFIG_DIR } from "../config.js";
 import { provisionDispatcherWorkspace } from "./workspace-init.js";
 import { addWorkspace } from "./state.js";
-import { existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, cpSync } from "fs";
 import { join } from "path";
 
 const DISPATCHER_NAME = "_dispatcher";
@@ -61,6 +61,8 @@ export async function startDispatcher(
     wsEntry = workspaces[workspaces.length - 1];
     console.log(`[dispatcher] registered workspace: ${wsAlias} → ${wsPath}`);
   } else if (wsEntry.path !== wsPath) {
+    const oldPath = wsEntry.path;
+    migrateDispatcherData(oldPath, wsPath);
     wsEntry.path = wsPath;
     addWorkspace(wsAlias, wsPath);
     console.log(`[dispatcher] corrected workspace path: ${wsAlias} → ${wsPath}`);
@@ -90,6 +92,30 @@ function subscribeToFleetEvents(
     if (event.agentName === DISPATCHER_NAME) return;
     console.log(`[dispatcher] fleet changed (${event.type} on ${event.agentName}): ${fleet.getStatus().total} agents — preamble will refresh on next message`);
   });
+}
+
+const DISPATCHER_FILES = ["AGENTS.md", "memory", "tools"];
+
+function migrateDispatcherData(oldPath: string, newPath: string): void {
+  if (!existsSync(oldPath)) return;
+  if (oldPath === newPath) return;
+
+  const itemsToMigrate = DISPATCHER_FILES.filter(
+    (item) => existsSync(join(oldPath, item)) && !existsSync(join(newPath, item)),
+  );
+
+  if (itemsToMigrate.length === 0) return;
+
+  mkdirSync(newPath, { recursive: true });
+  for (const item of itemsToMigrate) {
+    try {
+      cpSync(join(oldPath, item), join(newPath, item), { recursive: true });
+      console.log(`[dispatcher] migrated ${item} from ${oldPath}`);
+    } catch (err) {
+      console.warn(`[dispatcher] failed to migrate ${item}: ${(err as Error).message}`);
+    }
+  }
+  console.log(`[dispatcher] migrated ${itemsToMigrate.length} item(s) from old path — original files left untouched`);
 }
 
 export const DISPATCHER_AGENT_NAME = DISPATCHER_NAME;
