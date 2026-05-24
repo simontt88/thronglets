@@ -41,15 +41,16 @@
 </table>
 
 <details>
-<summary><strong>🎬 Demo videos</strong></summary>
+<summary><strong>🎬 Demo videos</strong> (click to expand)</summary>
+<br>
 
-**Dashboard walkthrough** — studio mode, agent chat, live output:
+**Dashboard walkthrough** — studio mode, agent chat, live output
 
-https://github.com/simontt88/thronglets/releases/download/v0.7.0/thronglets_interface_example.mp4
+<video src="https://github.com/simontt88/thronglets/releases/download/v0.7.0/thronglets_interface_example.mp4" controls width="100%"></video>
 
-**Telegram bot** — spawning, routing, fleet management:
+**Telegram bot** — spawning, routing, fleet management
 
-https://github.com/simontt88/thronglets/releases/download/v0.7.0/thronglets_telegram_example.mp4
+<video src="https://github.com/simontt88/thronglets/releases/download/v0.7.0/thronglets_telegram_example.mp4" controls width="100%"></video>
 
 </details>
 
