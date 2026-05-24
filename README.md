@@ -24,29 +24,45 @@
 ---
 
 <p align="center">
-  <img src="docs/assets/dashboard-studio.png" alt="Dashboard — fleet overview with dispatcher and agents working" width="800" />
+  <img src="docs/assets/dashboard-studio.png" alt="Dashboard — fleet overview with dispatcher and agents working" width="100%" />
 </p>
 
-<p align="center">
-  <img src="docs/assets/dashboard-chill.png" alt="Chill mode — pixel art creatures roaming" width="800" />
-</p>
+<table>
+  <tr>
+    <td width="60%">
+      <img src="docs/assets/dashboard-chill.png" alt="Chill mode — pixel art creatures roaming" width="100%" />
+      <p align="center"><sub>Chill mode — your throngs roaming as pixel creatures</sub></p>
+    </td>
+    <td width="40%">
+      <img src="docs/assets/telegram-demo.png" alt="Telegram bot — spawn and manage agents" width="100%" />
+      <p align="center"><sub>Telegram — hatch and manage from your phone</sub></p>
+    </td>
+  </tr>
+</table>
 
-<p align="center">
-  <img src="docs/assets/telegram-demo.png" alt="Telegram bot — spawn and manage agents" width="300" />
-</p>
+<details>
+<summary><strong>🎬 Demo videos</strong></summary>
+
+**Dashboard walkthrough** — studio mode, agent chat, live output:
+
+https://github.com/simontt88/thronglets/releases/download/v0.7.0/thronglets_interface_example.mp4
+
+**Telegram bot** — spawning, routing, fleet management:
+
+https://github.com/simontt88/thronglets/releases/download/v0.7.0/thronglets_telegram_example.mp4
+
+</details>
 
 ## Why "Thronglets"?
 
-The name comes from *Black Mirror* — those little digital creatures living inside a simulation. We thought it was funny for coding agents. It stuck.
+The name comes from *Black Mirror* — those little digital creatures trapped in a simulation. We thought it was funny for coding agents. It stuck.
 
-Here's the thing: you already have great AI agents. Your Cursor session knows your codebase. But they're each stuck in their own window, and you're the only one routing work between them.
+You already have great AI coding agents — Cursor, Claude Code, Codex. But each one lives in its own window, and *you're* the bottleneck, manually routing tasks between them.
 
-So we built the missing piece — a **dispatcher agent** that sits in its own workspace, sees the entire fleet, and routes tasks to the right throng. You just type into Telegram. The dispatcher figures out who's free, what workspace matches, and forwards your message. When you're not even talking, you can `/poke` the dispatcher and it'll look at its goal and start assigning work to idle agents on its own.
-
-Every throng gets a procedurally generated name and a pixel art face. Same name always produces the same creature. They have moods — working, waiting, sleeping, dead. It's cosmetic, but it makes you actually care when one of them dies.
+Thronglets fixes that. You get a **dispatcher** — itself an AI agent — that sits in its own workspace, sees the whole fleet, and routes work to the right throng. You just type into Telegram (or Lark, or Discord). The dispatcher figures out who's free, which workspace matches, and forwards your message. When you're not even talking to it, `/poke` the dispatcher and it'll check its goal and start assigning work on its own.
 
 ```
-You:        fix the tests          (no @mention — dispatcher handles it)
+You:        fix the tests
 Dispatcher: Routing to Kilo (idle, assigned to infra workspace)
 Kilo:       Found the issue — Node 18 assertion, fixing...
 
@@ -54,7 +70,9 @@ You:        @Vexo refactor the auth module
 Vexo:       On it — restructuring into middleware pattern...
 ```
 
-Not a new AI framework. No DSL, no "agentic workflow engine." Just identity, a dispatcher, and a message bus on top of tools you already use.
+Every throng gets a procedurally generated name and a pixel art face. Same name always produces the same creature. They have moods — working, waiting, sleeping, dead. It's purely cosmetic, but you *will* feel bad when one of them dies.
+
+No new framework. No DSL. Just identity, a dispatcher, and a message bus on top of tools you already use.
 
 ## Quick Start
 
@@ -192,7 +210,7 @@ agents:
   - name: default
     runtime: cursor
     api_key: ${CURSOR_API_KEY}
-    model: claude-sonnet-4-6
+    model: claude-opus-4-6
 
 dispatcher:
   enabled: true
@@ -208,26 +226,33 @@ See [`config.yaml.example`](config.yaml.example) for the full reference.
 
 ### Environment Variables
 
-All config values can be overridden via environment variables:
-
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `TELEGRAM_BOT_TOKEN` | — | Telegram bot token (from [@BotFather](https://t.me/BotFather)) |
-| `CURSOR_API_KEY` | — | Cursor API key (from [cursor.com/settings](https://cursor.com/settings)) |
+| `CURSOR_API_KEY` | — | API key for the agent runtime (from [cursor.com/settings](https://cursor.com/settings)) |
 | `THRONGLETS_HOME` | `~/.thronglets` | Config directory override |
 | `BRIDGE_PORT` | `3847` | Dashboard / API port |
 | `BRIDGE_TRANSPORT` | `telegram` | Transport: `telegram`, `lark`, `discord` |
 | `BRIDGE_WORKSPACE` | cwd | Default workspace path |
-| `CURSOR_MODEL` | `claude-sonnet-4-6` | Model for Cursor agents |
 | `TELEGRAM_ALLOWED_CHATS` | — | Comma-separated chat IDs |
+
+### Supported Runtimes
+
+| Runtime | Status | Default model | SDK |
+|---------|--------|---------------|-----|
+| **Cursor** | Stable — primary, well-tested | `claude-opus-4-6` | `@cursor/sdk` (bundled) |
+| **Claude Code** | Experimental | — | `@anthropic-ai/claude-agent-sdk` (bundled) |
+| **Codex** | Experimental | — | `@openai/codex-sdk` (bundled) |
+
+> Cursor is the primary runtime and the one we test against day-to-day. Claude Code and Codex runtimes are implemented and functional, but haven't received the same level of testing. Contributions and bug reports welcome!
 
 ### Supported Transports
 
-| Transport | Status | Connection |
-|-----------|--------|------------|
-| Telegram | Stable | Long-polling via Bot API |
-| Lark/Feishu | Beta | Event subscription |
-| Discord | Beta | Gateway WebSocket |
+| Transport | Status | Connection | Setup |
+|-----------|--------|------------|-------|
+| Telegram | Stable | Long-polling via Bot API | Bundled |
+| Lark/Feishu | Experimental | Event subscription | `npm install @larksuiteoapi/node-sdk` |
+| Discord | Experimental | Gateway WebSocket | `npm install discord.js` |
 
 ## Architecture
 

@@ -9,7 +9,7 @@ agents:
   - name: default
     runtime: cursor
     api_key: ${CURSOR_API_KEY}  # Get from: https://cursor.com/settings
-    model: claude-sonnet-4-6
+    model: claude-opus-4-6
 
 # Dispatcher: AI-powered message router that manages the fleet
 dispatcher:
