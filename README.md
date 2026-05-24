@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="docs/assets/hero-dashboard.png" alt="Thronglets Dashboard — pixel art agents working in your codebase" width="720" />
-</p>
-
 <h1 align="center">Thronglets</h1>
 
 <p align="center">
@@ -71,12 +67,6 @@ npm start
 
 Open Telegram → `/hatch` → watch your first throng hatch.
 
-## See It In Action
-
-| Spawn from Telegram | Agent at work |
-|:---:|:---:|
-| <img src="docs/assets/demo-spawn.png" alt="Hatching a throng from Telegram" width="280" /> | <img src="docs/assets/demo-dashboard.png" alt="Throng working on tasks" width="420" /> |
-
 ## Features
 
 | Feature | Description |
@@ -93,11 +83,22 @@ Open Telegram → `/hatch` → watch your first throng hatch.
 
 ## How It Works
 
-<p align="center">
-  <img src="docs/assets/architecture.svg" alt="Thronglets architecture — Telegram → Dispatcher → Fleet → Dashboard" width="600" />
-</p>
+```
+┌──────────┐         ┌──────────────┐         ┌──────────────┐
+│ Telegram │ ──────▶ │  Dispatcher  │ ──────▶ │    Throng    │
+│  / Lark  │         │   (Orix)     │         │   (Zuri)     │
+└──────────┘         └──────┬───────┘         └──────────────┘
+     ▲                      │
+     │                      │                 ┌──────────────┐
+     │                      └───────────────▶ │    Throng    │
+     │                                        │   (Mira)     │
+     │         ┌──────────────┐               └──────────────┘
+     └──────── │  Dashboard   │
+               │  (localhost) │
+               └──────────────┘
+```
 
-The **dispatcher** is itself an agent (named Orix) with its own workspace. It receives every unaddressed message, sees the full fleet status (who's idle, who's working, which workspace each agent is in), and forwards tasks using `fleet_send`. It maintains a persistent goal — `/poke` it and it proactively assigns work to idle throngs.
+The **dispatcher** is itself an agent with its own workspace. It receives every unaddressed message, sees the full fleet status (who's idle, who's working, which workspace each agent is in), and forwards tasks using `fleet_send`. It maintains a persistent goal — `/poke` it and it proactively assigns work to idle throngs.
 
 Each throng runs as a separate Cursor SDK agent session with full IDE capabilities.
 
@@ -105,9 +106,18 @@ Each throng runs as a separate Cursor SDK agent session with full IDE capabiliti
 
 Control how throngs communicate with each other. Set `fleet.comms` in your config:
 
-<p align="center">
-  <img src="docs/assets/comms-modes.svg" alt="Three communication modes: swarm, hive, leash" width="720" />
-</p>
+```
+SWARM                    HIVE (default)            LEASH
+─────                    ──────────────            ─────
+
+   You                      You                      You
+    │                        │                       ╱   ╲
+    ▼                        ▼                      ▼     ▼
+Dispatcher              Dispatcher              Dispatcher
+  ▼    ▼                  ▼    ▲ ▲                ▼     ▼
+Zuri ⇄ Mira             Zuri   Mira             Zuri   Mira
+                         (no cross-talk)         (reply to you only)
+```
 
 | Mode | Throng → Throng | Throng → Dispatcher | Throng → Human | Dispatcher → Throng |
 |------|:---:|:---:|:---:|:---:|
@@ -115,7 +125,7 @@ Control how throngs communicate with each other. Set `fleet.comms` in your confi
 | **`hive`** (default) | Blocked | OK | OK | OK |
 | **`leash`** | Blocked | Blocked | OK | OK |
 
-- **swarm** — free-roaming. Throngs message anyone, including each other. Can get chaotic with large fleets.
+- **swarm** — free-roaming. Throngs message anyone, including each other.
 - **hive** — hub-and-spoke. Throngs report to the dispatcher only. No cross-talk. Recommended.
 - **leash** — throngs only respond to the human. The dispatcher can still push tasks to them, but throngs can't initiate messages to anyone except the user.
 
