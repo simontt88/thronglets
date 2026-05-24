@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSy
 import { createHash } from "crypto";
 import { join, relative, dirname, basename } from "path";
 import { homedir } from "os";
+import { GLOBAL_CONFIG_DIR } from "./config.js";
 
 export interface ParsedRule {
   filePath: string;
@@ -197,7 +198,7 @@ function computeRulesHash(workspace: string): string {
 }
 
 function getOpenAIKey(): string | null {
-  const configPath = join(homedir(), ".thronglets", "config.yaml");
+  const configPath = join(GLOBAL_CONFIG_DIR, "config.yaml");
   if (existsSync(configPath)) {
     const content = readFileSync(configPath, "utf-8");
     const match = content.match(/api_key:\s*["']?(sk-proj-[^"'\s]+)/);

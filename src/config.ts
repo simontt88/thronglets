@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, renameSync } from "fs";
 import { join, resolve } from "path";
 import { homedir } from "os";
 import { parse as parseYaml } from "yaml";
@@ -77,7 +77,36 @@ export interface BridgeConfig {
   fleet: FleetConfig;
 }
 
-const GLOBAL_CONFIG_DIR = process.env.THRONGLETS_HOME || join(homedir(), ".thronglets");
+const LEGACY_DIRS = [".agent-bridge", ".kenyalang"];
+const DEFAULT_DIR = ".thronglets";
+
+function resolveConfigDir(): string {
+  if (process.env.THRONGLETS_HOME) return process.env.THRONGLETS_HOME;
+
+  const defaultPath = join(homedir(), DEFAULT_DIR);
+  if (existsSync(defaultPath)) return defaultPath;
+
+  for (const legacy of LEGACY_DIRS) {
+    const legacyPath = join(homedir(), legacy);
+    if (existsSync(legacyPath)) {
+      console.log(`[config] found legacy config at ~/${legacy}`);
+      console.log(`[config] migrating: ~/${legacy} → ~/${DEFAULT_DIR}`);
+      try {
+        renameSync(legacyPath, defaultPath);
+        console.log(`[config] migration complete`);
+        return defaultPath;
+      } catch (err) {
+        console.warn(`[config] auto-migrate failed (${(err as Error).message}), using ~/${legacy} as-is`);
+        console.warn(`[config] set THRONGLETS_HOME=~/${legacy} or manually rename to ~/${DEFAULT_DIR}`);
+        return legacyPath;
+      }
+    }
+  }
+
+  return defaultPath;
+}
+
+export const GLOBAL_CONFIG_DIR = resolveConfigDir();
 const GLOBAL_CONFIG_PATH = join(GLOBAL_CONFIG_DIR, "config.yaml");
 
 function resolveEnvVars(value: string): string {

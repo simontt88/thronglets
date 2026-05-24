@@ -1,6 +1,7 @@
 import type { FleetManager, FleetEventBus } from "./manager.js";
 import type { WorkspaceEntry } from "./types.js";
 import type { BridgeConfig, RuntimeType } from "../config.js";
+import { GLOBAL_CONFIG_DIR } from "../config.js";
 import { provisionDispatcherWorkspace } from "./workspace-init.js";
 import { addWorkspace } from "./state.js";
 import { existsSync, mkdirSync } from "fs";
@@ -8,10 +9,7 @@ import { join } from "path";
 import { homedir } from "os";
 
 const DISPATCHER_NAME = "_dispatcher";
-const DEFAULT_DISPATCH_DIR = join(
-  process.env.THRONGLETS_HOME || join(homedir(), ".thronglets"),
-  "dispatch",
-);
+const DEFAULT_DISPATCH_DIR = join(GLOBAL_CONFIG_DIR, "dispatch");
 
 export interface DispatcherConfig {
   enabled: boolean;

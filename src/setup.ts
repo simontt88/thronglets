@@ -1,9 +1,9 @@
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
 import { createInterface } from "readline";
+import { GLOBAL_CONFIG_DIR } from "./config.js";
 
-const CONFIG_DIR = join(homedir(), ".thronglets");
+const CONFIG_DIR = GLOBAL_CONFIG_DIR;
 const CONFIG_PATH = join(CONFIG_DIR, "config.yaml");
 
 function prompt(question: string): Promise<string> {

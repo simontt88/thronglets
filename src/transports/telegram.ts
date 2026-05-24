@@ -1,10 +1,10 @@
 import TelegramBot from "node-telegram-bot-api";
 import { existsSync, readFileSync, writeFileSync, unlinkSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
 import type { Transport, IncomingMessage, TransportOptions } from "./interface.js";
+import { GLOBAL_CONFIG_DIR } from "../config.js";
 
-const THRONGLETS_HOME = process.env.THRONGLETS_HOME || join(homedir(), ".thronglets");
+const THRONGLETS_HOME = GLOBAL_CONFIG_DIR;
 const PID_FILE = join(THRONGLETS_HOME, "bridge.pid");
 
 export interface TelegramConfig {

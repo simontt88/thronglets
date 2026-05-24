@@ -211,9 +211,45 @@ curl -X POST http://localhost:3847/api/workspaces \
 ```
 
 ### Upgrading
+
 ```bash
 git pull
 npm install
 cd packages/dashboard && npm install && npm run build && cd ../..
 # Restart service — fleet state is preserved across restarts
 ```
+
+**What `git pull` + `npm install` does NOT touch:**
+- `~/.thronglets/config.yaml` — never overwritten
+- `~/.thronglets/dispatch/` — dispatcher workspace (AGENTS.md, memory/, tools/)
+- `~/.thronglets/workspaces.yaml` — workspace registry
+- `~/.thronglets/fleet/` — fleet state and session logs
+- Any agent workspace directories
+
+All provisioning functions use `writeIfMissing` / `existsSync` guards — they only create files that don't exist yet. Existing user data is never overwritten.
+
+### Config directory migration
+
+The config directory has been renamed over time:
+
+| Version | Directory |
+|---------|-----------|
+| v0.1–v0.3 | `~/.kenyalang` |
+| v0.4–v0.6 | `~/.agent-bridge` |
+| v0.7+ | `~/.thronglets` |
+
+**Auto-migration on startup:** If `~/.thronglets` doesn't exist but `~/.agent-bridge` or `~/.kenyalang` does, the service automatically renames the old directory to `~/.thronglets`. If the rename fails (permissions, cross-device), it falls back to the old path and logs a warning.
+
+**Manual override:** Set `THRONGLETS_HOME` env var to use any directory:
+```bash
+THRONGLETS_HOME=/home/user/.agent-bridge npm start
+```
+
+**Resolution order:**
+1. `$THRONGLETS_HOME` (env var — highest priority)
+2. `~/.thronglets` (if exists)
+3. `~/.agent-bridge` (legacy, auto-migrated)
+4. `~/.kenyalang` (legacy, auto-migrated)
+5. `~/.thronglets` (created fresh if nothing found)
+
+**All path references in the codebase** import `GLOBAL_CONFIG_DIR` from `config.ts` — there are no hardcoded `~/.thronglets` paths elsewhere. If you add new code that needs the config dir, always import `GLOBAL_CONFIG_DIR`.

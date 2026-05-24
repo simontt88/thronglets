@@ -1,10 +1,10 @@
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from "fs";
 import { join } from "path";
-import { homedir } from "os";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { FleetState, WorkspaceEntry } from "./types.js";
+import { GLOBAL_CONFIG_DIR } from "../config.js";
 
-const THRONGLETS_HOME = process.env.THRONGLETS_HOME || join(homedir(), ".thronglets");
+const THRONGLETS_HOME = GLOBAL_CONFIG_DIR;
 const FLEET_DIR = join(THRONGLETS_HOME, "fleet");
 const STATE_FILE = join(FLEET_DIR, "fleet-state.json");
 const WORKSPACES_FILE = join(THRONGLETS_HOME, "workspaces.yaml");
