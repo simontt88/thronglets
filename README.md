@@ -33,9 +33,9 @@ The name comes from *Black Mirror* — those little digital creatures living ins
 
 Here's the thing: you already have great AI agents. Your Cursor session knows your codebase. Your Claude Code terminal can refactor anything. But they're each stuck in their own window, and you're the only one routing work between them.
 
-So we built the missing piece — a **dispatcher agent** that sits in its own workspace, sees the entire fleet, and routes tasks to the right thronglet. You just type into Telegram. The dispatcher figures out who's free, what workspace matches, and forwards your message. When you're not even talking, you can `/poke` the dispatcher and it'll look at its goal and start assigning work to idle agents on its own.
+So we built the missing piece — a **dispatcher agent** that sits in its own workspace, sees the entire fleet, and routes tasks to the right throng. You just type into Telegram. The dispatcher figures out who's free, what workspace matches, and forwards your message. When you're not even talking, you can `/poke` the dispatcher and it'll look at its goal and start assigning work to idle agents on its own.
 
-Every thronglet gets a procedurally generated name and a pixel art face. Same name always produces the same creature. They have moods — grinding, waiting, sleeping, dead. It's cosmetic, but it makes you actually care when one of them dies.
+Every throng gets a procedurally generated name and a pixel art face. Same name always produces the same creature. They have moods — grinding, waiting, sleeping, dead. It's cosmetic, but it makes you actually care when one of them dies.
 
 ```
 You:        fix the tests          (no @mention — dispatcher handles it)
@@ -69,13 +69,13 @@ Launch:
 npm start
 ```
 
-Open Telegram → `/new` → watch your first thronglet hatch.
+Open Telegram → `/hatch` → watch your first throng hatch.
 
 ## See It In Action
 
 | Spawn from Telegram | Agent at work |
 |:---:|:---:|
-| <img src="docs/assets/demo-spawn.png" alt="Spawning a thronglet from Telegram" width="280" /> | <img src="docs/assets/demo-dashboard.png" alt="Thronglet working on tasks" width="420" /> |
+| <img src="docs/assets/demo-spawn.png" alt="Hatching a throng from Telegram" width="280" /> | <img src="docs/assets/demo-dashboard.png" alt="Throng working on tasks" width="420" /> |
 
 ## Features
 
@@ -83,11 +83,10 @@ Open Telegram → `/new` → watch your first thronglet hatch.
 |---------|-------------|
 | **Fleet Management** | Spawn, kill, reconfigure agents on the fly. Each has its own session, workspace, and identity |
 | **Procedural Avatars** | Every agent gets a unique pixel art creature — deterministic from name, with mood animations (idle, working, happy, sleeping, dead) |
-| **Dispatcher Agent** | A dedicated agent with its own workspace that manages the fleet. Routes messages by workspace match and runtime strength. Has a persistent goal — `/poke` it and it autonomously assigns work to idle thronglets |
-| **Multi-Runtime** | Cursor SDK, Claude Code CLI, OpenAI Codex — mix runtimes in the same fleet |
+| **Dispatcher Agent** | A dedicated agent with its own workspace that manages the fleet. Routes messages by workspace match. Has a persistent goal — `/poke` it and it autonomously assigns work to idle throngs |
+| **Comms Control** | Three modes — `swarm` (free chat), `hive` (hub-and-spoke), `leash` (human-only). Configurable Telegram visibility |
 | **Multi-Platform** | Telegram (primary), Lark/Feishu, Discord transports |
 | **Web Dashboard** | Real-time fleet visualization with session history, live output streaming, and agent state |
-| **Inter-Agent Comms** | Agents can message each other via `[FLEET:SEND]` markers. Request-reply pattern with routing |
 | **Auto-Recovery** | Heartbeat monitoring, dead agent detection, automatic restart without manual intervention |
 | **Session Management** | Archive and recall past sessions per agent. Clear context without killing the creature |
 | **Workspace Isolation** | Each agent can be assigned to a different project directory |
@@ -98,35 +97,48 @@ Open Telegram → `/new` → watch your first thronglet hatch.
   <img src="docs/assets/architecture.svg" alt="Thronglets architecture — Telegram → Dispatcher → Fleet → Dashboard" width="600" />
 </p>
 
-The **dispatcher** is itself an agent (named Orix) with its own workspace. It receives every unaddressed message, sees the full fleet status (who's idle, who's working, which workspace each agent is in), and forwards tasks using `fleet_send`. It maintains a persistent goal — `/poke` it and it proactively assigns work to idle thronglets.
+The **dispatcher** is itself an agent (named Orix) with its own workspace. It receives every unaddressed message, sees the full fleet status (who's idle, who's working, which workspace each agent is in), and forwards tasks using `fleet_send`. It maintains a persistent goal — `/poke` it and it proactively assigns work to idle throngs.
 
-Each thronglet runs as a separate agent session:
-- **Cursor agents** use `@cursor/sdk` — full IDE capabilities, file editing, terminal access
-- **Claude Code agents** use the Claude Code CLI — terminal-native coding
-- **Codex agents** use `@openai/codex-sdk` — OpenAI's coding agent
+Each throng runs as a separate Cursor SDK agent session with full IDE capabilities.
+
+## Communication Modes
+
+Control how throngs communicate with each other. Set `fleet.comms` in your config:
+
+<p align="center">
+  <img src="docs/assets/comms-modes.svg" alt="Three communication modes: swarm, hive, leash" width="720" />
+</p>
+
+| Mode | Description |
+|------|-------------|
+| **`swarm`** | Throngs can message any other throng freely. Can get chaotic. |
+| **`hive`** | Throngs can only report back to the dispatcher. No cross-talk. **(default)** |
+| **`leash`** | Throngs can't send messages at all. Only the human and dispatcher can talk to them. |
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `/new [name] [runtime] [workspace]` | Hatch a thronglet (auto-named if omitted) |
-| `/kill <name>` | Release a thronglet |
-| `/fleet` | Show all thronglets with status |
-| `/status [name]` | Detailed thronglet info |
-| `/title <name> <title>` | Set a thronglet's role/title |
+| `/hatch [runtime] [workspace]` | Hatch a throng (auto-named) |
+| `/kill <name>` | Release a throng |
+| `/fleet` | Show all throngs with status |
+| `/status [name]` | Detailed throng info |
+| `/title <name> <title>` | Set a throng's role/title |
 | `/workspace [add alias path]` | List or register workspaces |
 | `/dispatcher [restart]` | Dispatcher status or restart |
 | `/clear <name>` | Archive session, fresh context |
 | `/change <name> <field> <value>` | Reconfigure runtime/model/workspace |
+| `/poke` | Nudge dispatcher to assign work |
+| `/goal [text]` | View or set fleet goal |
 | `/help` | Show all commands |
 
 ### Messaging
 
 | Pattern | Behavior |
 |---------|----------|
-| `@name message` | Send directly to a specific thronglet |
+| `@name message` | Send directly to a specific throng |
 | `@D message` | Route to the dispatcher |
-| `@all message` | Broadcast to all thronglets |
+| `@all message` | Broadcast to all throngs |
 | Plain text | Auto-routes via the dispatcher |
 
 ## Configuration
@@ -143,26 +155,22 @@ telegram:
     - "your-chat-id"
 
 agents:
-  - name: cursor
+  - name: default
     runtime: cursor
     api_key: ${CURSOR_API_KEY}
     model: claude-sonnet-4-6
 
 dispatcher:
   enabled: true
-  runtime: cursor
-  workspace: /path/to/orchestrator
+
+fleet:
+  comms: hive               # swarm | hive | leash
+  visibility:
+    inter_agent: summary    # full | summary | off
+    tool_calls: true
 ```
 
 See [`bridge.yaml.example`](bridge.yaml.example) for the full reference.
-
-### Supported Runtimes
-
-| Runtime | SDK | Requirements |
-|---------|-----|-------------|
-| Cursor | `@cursor/sdk` | Cursor API key ([cursor.com/settings](https://cursor.com/settings)) |
-| Claude Code | CLI subprocess | Claude Code installed + API key |
-| Codex | `@openai/codex-sdk` | OpenAI API key |
 
 ### Supported Transports
 
@@ -242,12 +250,11 @@ interface Runtime {
 
 ## Roadmap
 
-- [ ] **Memory layer** — persistent cross-session context per thronglet
+- [ ] **Memory layer** — persistent cross-session context per throng
 - [ ] **Slack transport** — Slack bot adapter
-- [ ] **Agent-to-agent delegation** — thronglets assigning subtasks to each other
 - [ ] **npm global install** — `npx thronglets` one-liner setup
 - [ ] **Docker image** — zero-dependency deployment
-- [ ] **Plugin system** — custom tools and behaviors per thronglet
+- [ ] **Plugin system** — custom tools and behaviors per throng
 
 ## Contributing
 
@@ -261,7 +268,7 @@ npm run dev   # starts with --watch
 
 ## License
 
-[MIT](LICENSE) — use it, fork it, hatch your own thronglets.
+[MIT](LICENSE) — use it, fork it, hatch your own throngs.
 
 ---
 

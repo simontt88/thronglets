@@ -1,4 +1,5 @@
 import type { AgentState, WorkspaceEntry } from "./types.js";
+import type { CommsMode } from "../config.js";
 import { getToolInstructions } from "./tools.js";
 
 interface FleetSnapshot {
@@ -10,7 +11,7 @@ interface FleetSnapshot {
   dead: number;
 }
 
-export function buildAgentPreamble(name: string, state: AgentState, sessionsDir: string): string {
+export function buildAgentPreamble(name: string, state: AgentState, sessionsDir: string, commsMode: CommsMode = "hive"): string {
   const titleStr = state.title ? ` — ${state.title}` : "";
   const personality = state.personality || "curious";
   return [
@@ -19,7 +20,7 @@ export function buildAgentPreamble(name: string, state: AgentState, sessionsDir:
     `You are a throng (coding agent) in the Thronglets fleet. Your session logs: ${sessionsDir}`,
     `Messages from other agents are prefixed [from:name]. Messages from the dispatcher are [from:_dispatcher]. Messages from the human master have no prefix.`,
     "",
-    getToolInstructions(false),
+    getToolInstructions(false, commsMode),
   ].join("\n");
 }
 

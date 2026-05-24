@@ -7,6 +7,8 @@ export type TransportType = "telegram" | "lark" | "discord";
 export type RuntimeType = "cursor" | "claude-code" | "codex";
 export type PermissionMode = "readonly" | "safe" | "full" | "custom";
 export type RecallMode = "local" | "cloud" | "both" | "off";
+export type CommsMode = "swarm" | "hive" | "leash";
+export type VisibilityLevel = "full" | "summary" | "off";
 
 export interface TelegramConfig {
   token: string;
@@ -50,6 +52,14 @@ export interface DispatcherDef {
   workspace?: string;
 }
 
+export interface FleetConfig {
+  comms: CommsMode;
+  visibility: {
+    interAgent: VisibilityLevel;
+    toolCalls: boolean;
+  };
+}
+
 export interface BridgeConfig {
   transport: TransportType;
   workspace: string;
@@ -64,6 +74,7 @@ export interface BridgeConfig {
   permissions?: { mode: PermissionMode };
   session?: SessionConfig;
   dispatcher?: DispatcherDef;
+  fleet: FleetConfig;
 }
 
 const GLOBAL_CONFIG_DIR = process.env.THRONGLETS_HOME || join(homedir(), ".thronglets");
@@ -154,6 +165,8 @@ export function loadConfig(): BridgeConfig {
   const rawSession = resolved.session as Record<string, unknown> | undefined;
   const rawPermissions = resolved.permissions as Record<string, unknown> | undefined;
   const rawDispatcher = resolved.dispatcher as Record<string, unknown> | boolean | undefined;
+  const rawFleet = resolved.fleet as Record<string, unknown> | undefined;
+  const rawVisibility = rawFleet?.visibility as Record<string, unknown> | undefined;
 
   const agents = parseAgents(resolved.agents);
 
@@ -207,6 +220,14 @@ export function loadConfig(): BridgeConfig {
             workspace: rawDispatcher.workspace as string | undefined,
           }
       : undefined,
+
+    fleet: {
+      comms: (rawFleet?.comms as CommsMode) || "hive",
+      visibility: {
+        interAgent: (rawVisibility?.inter_agent || rawVisibility?.interAgent || "summary") as VisibilityLevel,
+        toolCalls: rawVisibility?.tool_calls !== false && rawVisibility?.toolCalls !== false,
+      },
+    },
 
     session: rawSession ? {
       logDir: (rawSession.log_dir || rawSession.logDir || "") as string,

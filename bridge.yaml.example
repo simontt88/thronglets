@@ -16,6 +16,24 @@ dispatcher:
   enabled: true
   # workspace: dispatch  # auto-created under ~/.thronglets/dispatch
 
+# Fleet communication rules
+fleet:
+  # comms: who can talk to whom
+  #   swarm — throngs can message any other throng freely
+  #   hive  — throngs can only report to the dispatcher (default)
+  #   leash — throngs cannot send messages, only reply to human
+  comms: hive
+
+  # visibility: what you see in Telegram
+  visibility:
+    # inter_agent: inter-agent message notifications
+    #   full    — show full message content
+    #   summary — one-line "Orix → Zuri" notification (default)
+    #   off     — no notifications
+    inter_agent: summary
+    # tool_calls: show fleet tool execution logs
+    tool_calls: true
+
 # Optional: local conversation logs
 session:
   log_dir: ~/.thronglets/logs

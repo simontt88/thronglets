@@ -1,0 +1,195 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 320" font-family="system-ui, -apple-system, sans-serif">
+  <defs>
+    <style>
+      .title { font-size: 14px; font-weight: 700; fill: #f5c842; }
+      .label { font-size: 11px; fill: #e2e8f0; }
+      .sublabel { font-size: 10px; fill: #94a3b8; }
+      .arrow { stroke-width: 2; fill: none; marker-end: url(#arrowhead); }
+      .arrow-ok { stroke: #4ade80; }
+      .arrow-block { stroke: #ef4444; stroke-dasharray: 6,4; }
+      .arrow-dispatch { stroke: #f5c842; }
+      .box { rx: 8; fill: #1e293b; stroke: #334155; stroke-width: 1.5; }
+      .human-box { rx: 8; fill: #1e293b; stroke: #60a5fa; stroke-width: 2; }
+      .dispatch-box { rx: 8; fill: #1e293b; stroke: #f5c842; stroke-width: 2; }
+    </style>
+    <marker id="arrowhead" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#94a3b8"/>
+    </marker>
+    <marker id="arrowgreen" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#4ade80"/>
+    </marker>
+    <marker id="arrowred" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#ef4444"/>
+    </marker>
+    <marker id="arrowyellow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#f5c842"/>
+    </marker>
+    <!-- Pixel throng face - simple 8x8 -->
+    <g id="throng">
+      <rect x="0" y="0" width="24" height="24" rx="4" fill="#2d1b4e"/>
+      <rect x="6" y="4" width="3" height="3" fill="#f5c842"/>
+      <rect x="15" y="4" width="3" height="3" fill="#f5c842"/>
+      <rect x="8" y="10" width="2" height="2" fill="#a78bfa"/>
+      <rect x="14" y="10" width="2" height="2" fill="#a78bfa"/>
+      <rect x="9" y="15" width="6" height="2" fill="#f5c842"/>
+      <rect x="4" y="0" width="2" height="6" fill="#a78bfa"/>
+      <rect x="18" y="0" width="2" height="6" fill="#a78bfa"/>
+    </g>
+    <g id="dispatcher">
+      <rect x="0" y="0" width="24" height="24" rx="4" fill="#1a2744"/>
+      <rect x="6" y="4" width="3" height="3" fill="#f5c842"/>
+      <rect x="15" y="4" width="3" height="3" fill="#f5c842"/>
+      <rect x="8" y="10" width="2" height="2" fill="#60a5fa"/>
+      <rect x="14" y="10" width="2" height="2" fill="#60a5fa"/>
+      <rect x="7" y="15" width="10" height="2" fill="#f5c842"/>
+      <rect x="4" y="0" width="2" height="6" fill="#60a5fa"/>
+      <rect x="18" y="0" width="2" height="6" fill="#60a5fa"/>
+    </g>
+    <g id="human">
+      <circle cx="12" cy="8" r="6" fill="#60a5fa"/>
+      <rect x="4" y="16" width="16" height="8" rx="3" fill="#60a5fa"/>
+    </g>
+  </defs>
+
+  <rect width="900" height="320" rx="12" fill="#0f172a"/>
+
+  <!-- ===== MODE 1: OPEN ===== -->
+  <g transform="translate(20, 15)">
+    <text x="120" y="0" text-anchor="middle" class="title">Swarm</text>
+    <text x="120" y="16" text-anchor="middle" class="sublabel">comms: swarm</text>
+
+    <!-- Human -->
+    <rect x="85" y="30" width="70" height="36" class="human-box"/>
+    <use href="#human" x="90" y="36"/>
+    <text x="118" y="53" class="label">You</text>
+
+    <!-- Dispatcher -->
+    <rect x="75" y="100" width="90" height="36" class="dispatch-box"/>
+    <use href="#dispatcher" x="80" y="106"/>
+    <text x="110" y="123" class="label">Dispatcher</text>
+
+    <!-- Throngs -->
+    <rect x="15" y="190" width="80" height="36" class="box"/>
+    <use href="#throng" x="20" y="196"/>
+    <text x="50" y="213" class="label">Zuri</text>
+
+    <rect x="145" y="190" width="80" height="36" class="box"/>
+    <use href="#throng" x="150" y="196"/>
+    <text x="180" y="213" class="label">Mira</text>
+
+    <!-- Arrows: human  dispatcher -->
+    <line x1="120" y1="66" x2="120" y2="100" class="arrow arrow-ok" marker-end="url(#arrowgreen)"/>
+
+    <!-- Arrows: dispatcher  throngs -->
+    <line x1="100" y1="136" x2="60" y2="190" class="arrow arrow-ok" marker-end="url(#arrowgreen)"/>
+    <line x1="140" y1="136" x2="180" y2="190" class="arrow arrow-ok" marker-end="url(#arrowgreen)"/>
+
+    <!-- Arrows: throng  throng (bidirectional) -->
+    <line x1="95" y1="208" x2="145" y2="208" class="arrow arrow-ok" marker-end="url(#arrowgreen)"/>
+    <line x1="145" y1="215" x2="95" y2="215" class="arrow arrow-ok" marker-end="url(#arrowgreen)"/>
+
+    <!-- Legend -->
+    <text x="15" y="260" class="sublabel">Free-roaming swarm.</text>
+    <text x="15" y="275" class="sublabel">Can get chaotic with large fleets.</text>
+  </g>
+
+  <!-- ===== MODE 2: DISPATCHER ===== -->
+  <g transform="translate(310, 15)">
+    <text x="120" y="0" text-anchor="middle" class="title">Hive (default)</text>
+    <text x="120" y="16" text-anchor="middle" class="sublabel">comms: hive</text>
+
+    <!-- Human -->
+    <rect x="85" y="30" width="70" height="36" class="human-box"/>
+    <use href="#human" x="90" y="36"/>
+    <text x="118" y="53" class="label">You</text>
+
+    <!-- Dispatcher -->
+    <rect x="75" y="100" width="90" height="36" class="dispatch-box"/>
+    <use href="#dispatcher" x="80" y="106"/>
+    <text x="110" y="123" class="label">Dispatcher</text>
+
+    <!-- Throngs -->
+    <rect x="15" y="190" width="80" height="36" class="box"/>
+    <use href="#throng" x="20" y="196"/>
+    <text x="50" y="213" class="label">Zuri</text>
+
+    <rect x="145" y="190" width="80" height="36" class="box"/>
+    <use href="#throng" x="150" y="196"/>
+    <text x="180" y="213" class="label">Mira</text>
+
+    <!-- Arrows: human  dispatcher -->
+    <line x1="120" y1="66" x2="120" y2="100" class="arrow arrow-ok" marker-end="url(#arrowgreen)"/>
+
+    <!-- Arrows: dispatcher  throngs -->
+    <line x1="100" y1="136" x2="60" y2="190" class="arrow arrow-ok" marker-end="url(#arrowgreen)"/>
+    <line x1="140" y1="136" x2="180" y2="190" class="arrow arrow-ok" marker-end="url(#arrowgreen)"/>
+
+    <!-- Arrows: throngs  dispatcher (report back) -->
+    <line x1="45" y1="190" x2="90" y2="136" class="arrow arrow-dispatch" marker-end="url(#arrowyellow)"/>
+    <line x1="195" y1="190" x2="150" y2="136" class="arrow arrow-dispatch" marker-end="url(#arrowyellow)"/>
+
+    <!-- Blocked: throng  throng -->
+    <line x1="95" y1="211" x2="145" y2="211" class="arrow arrow-block" marker-end="url(#arrowred)"/>
+
+    <!-- Legend -->
+    <text x="5" y="260" class="sublabel">All comms through the queen.</text>
+    <text x="5" y="275" class="sublabel">No cross-talk. Recommended.</text>
+  </g>
+
+  <!-- ===== MODE 3: SILENT ===== -->
+  <g transform="translate(600, 15)">
+    <text x="120" y="0" text-anchor="middle" class="title">Leash</text>
+    <text x="120" y="16" text-anchor="middle" class="sublabel">comms: leash</text>
+
+    <!-- Human -->
+    <rect x="85" y="30" width="70" height="36" class="human-box"/>
+    <use href="#human" x="90" y="36"/>
+    <text x="118" y="53" class="label">You</text>
+
+    <!-- Dispatcher -->
+    <rect x="75" y="100" width="90" height="36" class="dispatch-box"/>
+    <use href="#dispatcher" x="80" y="106"/>
+    <text x="110" y="123" class="label">Dispatcher</text>
+
+    <!-- Throngs -->
+    <rect x="15" y="190" width="80" height="36" class="box"/>
+    <use href="#throng" x="20" y="196"/>
+    <text x="50" y="213" class="label">Zuri</text>
+
+    <rect x="145" y="190" width="80" height="36" class="box"/>
+    <use href="#throng" x="150" y="196"/>
+    <text x="180" y="213" class="label">Mira</text>
+
+    <!-- Arrows: human  dispatcher -->
+    <line x1="120" y1="66" x2="120" y2="100" class="arrow arrow-ok" marker-end="url(#arrowgreen)"/>
+
+    <!-- Arrows: dispatcher  throngs (one-way dispatch) -->
+    <line x1="100" y1="136" x2="60" y2="190" class="arrow arrow-ok" marker-end="url(#arrowgreen)"/>
+    <line x1="140" y1="136" x2="180" y2="190" class="arrow arrow-ok" marker-end="url(#arrowgreen)"/>
+
+    <!-- Blocked: throngs  dispatcher -->
+    <line x1="45" y1="190" x2="90" y2="136" class="arrow arrow-block" marker-end="url(#arrowred)"/>
+    <line x1="195" y1="190" x2="150" y2="136" class="arrow arrow-block" marker-end="url(#arrowred)"/>
+
+    <!-- Blocked: throng  throng -->
+    <line x1="95" y1="211" x2="145" y2="211" class="arrow arrow-block" marker-end="url(#arrowred)"/>
+
+    <!-- Human  throngs direct -->
+    <line x1="90" y1="66" x2="45" y2="190" class="arrow arrow-ok" marker-end="url(#arrowgreen)"/>
+    <line x1="150" y1="66" x2="195" y2="190" class="arrow arrow-ok" marker-end="url(#arrowgreen)"/>
+
+    <!-- Legend -->
+    <text x="15" y="260" class="sublabel">On a leash — human control only.</text>
+    <text x="15" y="275" class="sublabel">Zero autonomy.</text>
+  </g>
+
+  <!-- Bottom legend -->
+  <g transform="translate(250, 300)">
+    <line x1="0" y1="5" x2="25" y2="5" stroke="#4ade80" stroke-width="2"/>
+    <text x="30" y="9" class="sublabel">Allowed</text>
+    <line x1="100" y1="5" x2="125" y2="5" stroke="#f5c842" stroke-width="2"/>
+    <text x="130" y="9" class="sublabel">Report back</text>
+    <line x1="220" y1="5" x2="245" y2="5" stroke="#ef4444" stroke-width="2" stroke-dasharray="6,4"/>
+    <text x="250" y="9" class="sublabel">Blocked</text>
+  </g>
+</svg>

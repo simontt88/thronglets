@@ -1,7 +1,7 @@
 import { appendFileSync, readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { EventEmitter } from "events";
-import type { AgentDef, BridgeConfig, RuntimeType } from "../config.js";
+import type { AgentDef, BridgeConfig, RuntimeType, CommsMode } from "../config.js";
 import type { Runtime, AgentSession } from "../runtimes/interface.js";
 import { loadFleetState, saveFleetState, getSessionsDir, addWorkspace as addWorkspaceToState } from "./state.js";
 import { generateUniqueName } from "./naming.js";
@@ -56,6 +56,7 @@ export interface FleetManagerConfig {
   createRuntime: (agent: AgentDef) => Runtime;
   ensureRulesSync: (agent: AgentDef) => Promise<void>;
   getAgentDef: (runtime: RuntimeType, model?: string) => AgentDef;
+  commsMode: CommsMode;
 }
 
 const SEND_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes max per message
@@ -560,7 +561,7 @@ export class FleetManager {
       return buildDispatcherPreamble(this.getStatus(), this.config.workspaces, sessionsDir, this.getGoal());
     }
 
-    return buildAgentPreamble(name, live.state, sessionsDir);
+    return buildAgentPreamble(name, live.state, sessionsDir, this.config.commsMode);
   }
 
   private requestSessionName(name: string, live: LiveAgent): void {

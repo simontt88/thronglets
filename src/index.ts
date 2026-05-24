@@ -100,30 +100,40 @@ async function main() {
       if (match) return model ? { ...match, model } : match;
       return { name: runtime, runtime, apiKey: "", model: model || "claude-sonnet-4-6" };
     },
+    commsMode: config.fleet.comms,
   });
 
   await fleet.restore();
-  fleet.setPostReplyHook(createPostReplyHook(fleet, workspaces));
+  fleet.setPostReplyHook(createPostReplyHook(fleet, workspaces, config.fleet.comms));
 
   // Wire command router (handles all Telegram commands + @mentions + routing)
   const { getNotifyChatId } = setupCommandRouter({
     fleet, bus, transport, config, workspaces, version: VERSION,
   });
 
-  // Inter-agent notification callbacks
+  // Inter-agent notification callbacks — respect visibility config
+  const visibility = config.fleet.visibility;
+
   fleet.onPeerMessage((from, to, direction) => {
+    if (visibility.interAgent === "off") return;
     const chatId = getNotifyChatId();
     if (!chatId) return;
-    const label = direction === "sent" ? "📤" : "📥";
-    const arrow = direction === "sent" ? "→" : "←";
-    transport.sendReply(chatId, `${label} ${from} ${arrow} ${to}`).catch(() => {});
+    if (visibility.interAgent === "summary") {
+      const label = direction === "sent" ? "📤" : "📥";
+      transport.sendReply(chatId, `${label} ${from} → ${to}`).catch(() => {});
+    }
+    // "full" — handled by dispatcherBroadcast below
   });
 
   fleet.onDispatcherBroadcast((reply, fromAgent) => {
+    if (visibility.interAgent === "off") return;
     const chatId = getNotifyChatId();
     if (!chatId) return;
-    const truncated = reply.length > 1500 ? reply.slice(0, 1500) + "…" : reply;
-    transport.sendReply(chatId, `[dispatcher · re:${fromAgent}]\n${truncated}`).catch(() => {});
+    if (visibility.interAgent === "full") {
+      const truncated = reply.length > 1500 ? reply.slice(0, 1500) + "…" : reply;
+      transport.sendReply(chatId, `[dispatcher · re:${fromAgent}]\n${truncated}`).catch(() => {});
+    }
+    // "summary" — already handled by onPeerMessage
   });
 
   // Start dispatcher + server
@@ -151,7 +161,8 @@ async function main() {
   console.log(`  Workspaces:  ${workspaces.map((w) => `${w.alias}→${w.path.split("/").pop()}`).join(", ")}`);
   console.log(`  Runtimes:    ${config.agents.map((a) => `${a.name}(${a.runtime})`).join(", ")}`);
   console.log(`  Fleet:       ${fleet.listAgents().length} restored`);
-  console.log(`\n  Commands: /new /kill /fleet /clear /change /status /help`);
+  console.log(`  Comms:       ${config.fleet.comms} (inter-agent: ${config.fleet.visibility.interAgent})`);
+  console.log(`\n  Commands: /hatch /kill /fleet /clear /change /status /help`);
   console.log(`  Mention:  @name message | @all message\n`);
 
   // Dispatcher auto-recovery heartbeat

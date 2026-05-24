@@ -1,5 +1,6 @@
 import type { FleetManager } from "./manager.js";
 import type { MessageSender, WorkspaceEntry } from "./types.js";
+import type { CommsMode } from "../config.js";
 
 const FLEET_MARKER_REGEX = /\[FLEET:(\w+):(.*?)\]/g;
 const DISPATCHER_NAME = "_dispatcher";
@@ -8,22 +9,30 @@ type ToolPermission = "dispatcher" | "all";
 
 interface ToolDef {
   permission: ToolPermission;
-  execute: (args: Record<string, unknown>, agentName: string, fleet: FleetManager, workspaces: WorkspaceEntry[]) => Promise<string>;
+  execute: (args: Record<string, unknown>, agentName: string, fleet: FleetManager, workspaces: WorkspaceEntry[], commsMode: CommsMode) => Promise<string>;
 }
 
 const TOOLS: Record<string, ToolDef> = {
   fleet_send: {
     permission: "all",
-    async execute(args, agentName, fleet) {
+    async execute(args, agentName, fleet, _workspaces, commsMode) {
       const target = args.agent as string;
       const text = args.text as string;
       if (!target || !text) return "Error: fleet_send requires 'agent' and 'text'";
       if (target === agentName) return "Error: cannot send to yourself";
       if (!fleet.hasAgent(target)) return `Error: agent "${target}" not found`;
 
-      // Fire-and-forget: queue the message, don't await reply (avoid deadlock)
+      const isDispatcher = agentName === DISPATCHER_NAME;
+      const targetIsDispatcher = target === DISPATCHER_NAME;
+
+      if (commsMode === "leash" && !isDispatcher) {
+        return "Error: fleet_send disabled — comms mode is 'leash'. Only the dispatcher can send messages.";
+      }
+      if (commsMode === "hive" && !isDispatcher && !targetIsDispatcher) {
+        return `Error: cannot send to @${target} — comms mode is 'hive'. You can only report to the dispatcher.`;
+      }
+
       fleet.send(target, text, agentName).then((reply) => {
-        // Reply routing handled by the manager's post-reply hook
         console.log(`[fleet-tools] ${agentName} → ${target}: delivered, got ${reply.length} char reply`);
       }).catch((err) => {
         console.warn(`[fleet-tools] ${agentName} → ${target}: send failed: ${(err as Error).message?.slice(0, 60)}`);
@@ -121,6 +130,7 @@ const TOOLS: Record<string, ToolDef> = {
 export function createPostReplyHook(
   fleet: FleetManager,
   workspaces: WorkspaceEntry[],
+  commsMode: CommsMode,
 ) {
   return async (agentName: string, reply: string, _sender: MessageSender): Promise<string> => {
     const matches = [...reply.matchAll(FLEET_MARKER_REGEX)];
@@ -130,7 +140,7 @@ export function createPostReplyHook(
     const results: string[] = [];
 
     for (const match of matches) {
-      const [fullMatch, action, argsJson] = match;
+      const [_fullMatch, action, argsJson] = match;
       const tool = TOOLS[action];
 
       if (!tool) {
@@ -146,7 +156,7 @@ export function createPostReplyHook(
 
       try {
         const args = JSON.parse(argsJson);
-        const result = await tool.execute(args, agentName, fleet, workspaces);
+        const result = await tool.execute(args, agentName, fleet, workspaces, commsMode);
         results.push(`[FLEET-RESULT:${action}:${result}]`);
         console.log(`[fleet-tools] ${agentName} called ${action}: ${result.slice(0, 80)}`);
       } catch (err) {
@@ -155,9 +165,7 @@ export function createPostReplyHook(
       }
     }
 
-    // Strip markers from visible reply, append results as a log note
     const cleanReply = reply.replace(FLEET_MARKER_REGEX, "").trim();
-    // Log fleet tool results to session (but don't show them to user in Telegram)
     if (results.length > 0) {
       console.log(`[fleet-tools] ${agentName}: ${results.length} tool call(s) executed`);
     }
@@ -166,7 +174,7 @@ export function createPostReplyHook(
   };
 }
 
-export function getToolInstructions(isDispatcher: boolean): string {
+export function getToolInstructions(isDispatcher: boolean, commsMode: CommsMode = "hive"): string {
   if (isDispatcher) {
     return `
 ## Fleet Tools (you are the dispatcher — full control)
@@ -174,7 +182,7 @@ export function getToolInstructions(isDispatcher: boolean): string {
 You can execute fleet operations by including markers in your reply:
 
 - Send message to agent: [FLEET:fleet_send:{"agent":"name","text":"message"}]
-- Spawn new agent: [FLEET:fleet_spawn:{"name":"agentname","runtime":"cursor|claude-code|codex","workspace":"alias"}]
+- Spawn new agent: [FLEET:fleet_spawn:{"name":"agentname","runtime":"cursor","workspace":"alias"}]
 - Kill agent: [FLEET:fleet_kill:{"name":"agentname"}]
 - Clear agent session: [FLEET:fleet_clear:{"name":"agentname"}]
 - Get fleet status: [FLEET:fleet_status:{}]
@@ -188,8 +196,33 @@ Include the marker anywhere in your reply text — it will be stripped before sh
 `;
   }
 
+  if (commsMode === "leash") {
+    return `
+## Fleet Tools (leash mode — status only)
+
+You can check fleet status but CANNOT send messages to other agents.
+All communication goes through the human. Focus on your assigned task.
+
+- Get fleet status: [FLEET:fleet_status:{}]
+`;
+  }
+
+  if (commsMode === "hive") {
+    return `
+## Fleet Tools (hive mode — dispatcher comms only)
+
+You can communicate with the dispatcher only (not other agents directly):
+
+- Send message to dispatcher: [FLEET:fleet_send:{"agent":"_dispatcher","text":"message"}]
+- Get fleet status: [FLEET:fleet_status:{}]
+
+You CANNOT send messages to other agents — route through the dispatcher.
+Include the marker anywhere in your reply text — it will be stripped before showing to the user.
+`;
+  }
+
   return `
-## Fleet Tools (limited — send messages only)
+## Fleet Tools (swarm mode — send messages to any agent)
 
 You can communicate with other agents by including markers in your reply:
 

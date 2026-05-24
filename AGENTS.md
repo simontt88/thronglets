@@ -135,6 +135,36 @@ packages/
 
 `THRONGLETS_HOME` env var overrides `~/.thronglets`.
 
+## Fleet communication modes
+
+Control how throngs talk to each other via the `fleet.comms` setting in `config.yaml`:
+
+| Mode | Throng → Throng | Throng → Dispatcher | Dispatcher → Throng | Human → Anyone |
+|------|:---:|:---:|:---:|:---:|
+| **`swarm`** | OK | OK | OK | OK |
+| **`hive`** (default) | Blocked | OK | OK | OK |
+| **`leash`** | Blocked | Blocked | OK | OK |
+
+**`hive`** is recommended — throngs report to the dispatcher, the dispatcher coordinates. No cross-chatter.
+
+### Telegram visibility
+
+Control what inter-agent activity you see in Telegram via `fleet.visibility`:
+
+```yaml
+fleet:
+  comms: hive
+  visibility:
+    inter_agent: summary   # "full" | "summary" | "off"
+    tool_calls: true
+```
+
+| `inter_agent` | What you see |
+|---|---|
+| `full` | Full message content between agents |
+| `summary` | One-line notification: `📤 Orix → Zuri` |
+| `off` | Nothing — agents work silently |
+
 ## Maintenance notes
 
 ### Restarting the service
