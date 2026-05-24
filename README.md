@@ -46,19 +46,11 @@
 
 **Dashboard walkthrough** — studio mode, agent chat, live output
 
-<a href="https://github.com/simontt88/thronglets/releases/download/v0.7.0/thronglets_interface_example.mp4">
-  <img src="docs/assets/video-thumb-dashboard.png" alt="Dashboard demo video" width="600">
-</a>
-
-<sub>Click to download & play (37 MB)</sub>
+[![Dashboard demo](docs/assets/video-thumb-dashboard.png)](https://youtu.be/yyB6XmVZJhw)
 
 **Telegram bot** — spawning, routing, fleet management
 
-<a href="https://github.com/simontt88/thronglets/releases/download/v0.7.0/thronglets_telegram_example.mp4">
-  <img src="docs/assets/video-thumb-telegram.png" alt="Telegram demo video" width="300">
-</a>
-
-<sub>Click to download & play (163 MB)</sub>
+[![Telegram demo](docs/assets/video-thumb-telegram.png)](https://youtube.com/shorts/20UeTurF2HM)
 
 </details>
 
