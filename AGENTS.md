@@ -105,8 +105,6 @@ src/
 │   └── types.ts          # TypeScript interfaces
 ├── runtimes/
 │   ├── cursor.ts         # Cursor SDK integration (primary runtime)
-│   ├── claude-code.ts    # Claude Code CLI integration
-│   ├── codex.ts          # OpenAI Codex integration
 │   └── interface.ts      # Runtime interface contract
 ├── transports/
 │   ├── telegram.ts       # Telegram bot (polling mode)
@@ -139,11 +137,13 @@ packages/
 
 Control how throngs talk to each other via the `fleet.comms` setting in `config.yaml`:
 
-| Mode | Throng → Throng | Throng → Dispatcher | Dispatcher → Throng | Human → Anyone |
-|------|:---:|:---:|:---:|:---:|
-| **`swarm`** | OK | OK | OK | OK |
-| **`hive`** (default) | Blocked | OK | OK | OK |
-| **`leash`** | Blocked | Blocked | OK | OK |
+| Mode | Throng → Throng | Throng → Dispatcher | Throng → Human | Dispatcher → Throng | Human → Anyone |
+|------|:---:|:---:|:---:|:---:|:---:|
+| **`swarm`** | OK | OK | OK | OK | OK |
+| **`hive`** (default) | Blocked | OK | OK | OK | OK |
+| **`leash`** | Blocked | Blocked | OK | OK | OK |
+
+Throngs can **always** reply to the human — `fleet.comms` only controls inter-agent `fleet_send`. Human replies go through the normal agent reply channel (Telegram), not fleet tools.
 
 **`hive`** is recommended — throngs report to the dispatcher, the dispatcher coordinates. No cross-chatter.
 

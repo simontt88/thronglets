@@ -31,7 +31,7 @@
 
 The name comes from *Black Mirror* — those little digital creatures living inside a simulation. We thought it was funny for coding agents. It stuck.
 
-Here's the thing: you already have great AI agents. Your Cursor session knows your codebase. Your Claude Code terminal can refactor anything. But they're each stuck in their own window, and you're the only one routing work between them.
+Here's the thing: you already have great AI agents. Your Cursor session knows your codebase. But they're each stuck in their own window, and you're the only one routing work between them.
 
 So we built the missing piece — a **dispatcher agent** that sits in its own workspace, sees the entire fleet, and routes tasks to the right throng. You just type into Telegram. The dispatcher figures out who's free, what workspace matches, and forwards your message. When you're not even talking, you can `/poke` the dispatcher and it'll look at its goal and start assigning work to idle agents on its own.
 
@@ -109,11 +109,15 @@ Control how throngs communicate with each other. Set `fleet.comms` in your confi
   <img src="docs/assets/comms-modes.svg" alt="Three communication modes: swarm, hive, leash" width="720" />
 </p>
 
-| Mode | Description |
-|------|-------------|
-| **`swarm`** | Throngs can message any other throng freely. Can get chaotic. |
-| **`hive`** | Throngs can only report back to the dispatcher. No cross-talk. **(default)** |
-| **`leash`** | Throngs can't send messages at all. Only the human and dispatcher can talk to them. |
+| Mode | Throng → Throng | Throng → Dispatcher | Throng → Human | Dispatcher → Throng |
+|------|:---:|:---:|:---:|:---:|
+| **`swarm`** | OK | OK | OK | OK |
+| **`hive`** (default) | Blocked | OK | OK | OK |
+| **`leash`** | Blocked | Blocked | OK | OK |
+
+- **swarm** — free-roaming. Throngs message anyone, including each other. Can get chaotic with large fleets.
+- **hive** — hub-and-spoke. Throngs report to the dispatcher only. No cross-talk. Recommended.
+- **leash** — throngs only respond to the human. The dispatcher can still push tasks to them, but throngs can't initiate messages to anyone except the user.
 
 ## Commands
 
@@ -197,9 +201,7 @@ src/
 │   ├── lark.ts
 │   └── discord.ts
 ├── runtimes/         # Agent SDK backends
-│   ├── cursor.ts
-│   ├── claude-code.ts
-│   └── codex.ts
+│   └── cursor.ts
 ├── server/           # HTTP API + WebSocket
 │   └── http.ts
 ├── config.ts         # YAML + env var config loader
@@ -243,7 +245,7 @@ interface Runtime {
 | **Primary interface** | Telegram/Lark/Discord chat | CLI/GitHub | CLI/API |
 | **Agent identity** | Procedural names + pixel art avatars | Generic workers | Anonymous agents |
 | **Dispatch** | AI-powered smart routing | Task DAG planning | Graph-based DAG |
-| **Runtimes** | Cursor + Claude Code + Codex | Claude Code + Codex + Aider | Model-agnostic |
+| **Runtimes** | Cursor SDK | Claude Code + Codex + Aider | Model-agnostic |
 | **Dashboard** | Real-time web UI with creature visualization | Terminal UI | Web observability |
 | **Setup** | `npm install` + env vars | `npm install` + config | Docker/Python |
 | **Focus** | Chat-first fleet management | CI/PR-oriented parallel coding | Business workflow automation |
