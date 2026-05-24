@@ -23,6 +23,18 @@
 
 ---
 
+<p align="center">
+  <img src="docs/assets/dashboard-studio.png" alt="Dashboard — fleet overview with dispatcher and agents working" width="800" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/dashboard-chill.png" alt="Chill mode — pixel art creatures roaming" width="800" />
+</p>
+
+<p align="center">
+  <img src="docs/assets/telegram-demo.png" alt="Telegram bot — spawn and manage agents" width="300" />
+</p>
+
 ## Why "Thronglets"?
 
 The name comes from *Black Mirror* — those little digital creatures living inside a simulation. We thought it was funny for coding agents. It stuck.
