@@ -24,6 +24,13 @@ fleet:
   #   leash — throngs cannot send messages, only reply to human
   comms: hive
 
+  # timeouts: control agent lifecycle timing
+  # timeouts:
+  #   send_timeout_ms: 3600000        # 1 hour — max time waiting for agent response
+  #   session_max_age_ms: 1800000     # 30 min — idle session auto-close
+  #   stuck_working_grace_ms: 3660000 # 1h + 1min — grace before recovering stuck agents
+  #   health_check_interval_ms: 30000 # 30 sec — health check frequency
+
   # visibility: what you see in Telegram
   visibility:
     # inter_agent: inter-agent message notifications

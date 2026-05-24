@@ -1,13 +1,14 @@
 import { appendFileSync, readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { EventEmitter } from "events";
-import type { AgentDef, BridgeConfig, RuntimeType, CommsMode } from "../config.js";
+import type { AgentDef, BridgeConfig, RuntimeType, CommsMode, FleetTimeouts } from "../config.js";
+import { DEFAULT_TIMEOUTS } from "../config.js";
 import type { Runtime, AgentSession } from "../runtimes/interface.js";
-import { loadFleetState, saveFleetState, getSessionsDir, addWorkspace as addWorkspaceToState, removeWorkspace as removeWorkspaceFromState, renameWorkspace as renameWorkspaceInState, loadWorkspaces } from "./state.js";
+import { loadFleetState, saveFleetState, getSessionsDir, readRecentHistory, addWorkspace as addWorkspaceToState, removeWorkspace as removeWorkspaceFromState, renameWorkspace as renameWorkspaceInState, loadWorkspaces } from "./state.js";
 import { generateUniqueName } from "./naming.js";
 import { buildAgentPreamble, buildDispatcherPreamble } from "./preamble.js";
 import { DISPATCHER_NAME } from "../utils/constants.js";
-import { HealthMonitor, SEND_TIMEOUT_MS, SESSION_MAX_AGE_MS } from "./health-monitor.js";
+import { HealthMonitor } from "./health-monitor.js";
 import type { AgentState, AgentStatus, FleetEvent, FleetEventType, FleetState, QueuedMessage, MessageSender, WorkspaceEntry } from "./types.js";
 export type { WorkspaceEntry } from "./types.js";
 
@@ -58,6 +59,7 @@ export interface FleetManagerConfig {
   ensureRulesSync: (agent: AgentDef) => Promise<void>;
   getAgentDef: (runtime: RuntimeType, model?: string) => AgentDef;
   commsMode: CommsMode;
+  timeouts?: FleetTimeouts;
 }
 
 
@@ -82,8 +84,13 @@ export class FleetManager {
       bus,
       () => this.agents as Map<string, any>,
       () => this.persistState(),
+      config.timeouts,
     );
     this.healthMonitor.start();
+  }
+
+  get timeouts(): FleetTimeouts {
+    return this.healthMonitor.timeouts;
   }
 
   setPostReplyHook(hook: (agentName: string, reply: string, sender: MessageSender) => Promise<string>): void {
@@ -203,7 +210,7 @@ export class FleetManager {
   async spawn(name: string | undefined, runtime: RuntimeType, workspaceAlias: string, model?: string): Promise<string> {
     if (!name) name = this.autoName();
     if (this.agents.has(name)) {
-      return `"${name}" already exists. Use /kill first.`;
+      return `"${name}" already exists. Send it a message to wake it, or use /kill first to remove.`;
     }
 
     const workspacePath = this.resolveWorkspace(workspaceAlias);
@@ -222,9 +229,13 @@ export class FleetManager {
     const runtimeInstance = this.config.createRuntime(agentDef);
     const sessionId = this.generateSessionId();
 
+    // For the dispatcher, generate a display name so it has a consistent identity
+    const displayName = name === DISPATCHER_NAME ? generateUniqueName([]) : undefined;
+
     const agentState: AgentState = {
       name,
-      personality: generatePersonality(name),
+      displayName,
+      personality: generatePersonality(displayName || name),
       runtime,
       model: agentDef.model,
       workspace: workspaceAlias,
@@ -249,6 +260,41 @@ export class FleetManager {
     this.persistState();
 
     return `Agent "${name}" spawned (${runtime} · ${agentDef.model} · ${workspaceAlias})`;
+  }
+
+  async respawn(name: string): Promise<string> {
+    const live = this.agents.get(name);
+    if (!live) {
+      return `Agent "${name}" not found — cannot respawn.`;
+    }
+
+    // Close stale session
+    if (live.session) {
+      try { live.session.close(); } catch {}
+      live.session = null;
+    }
+
+    // Recreate runtime instance (same as spawn does) — ensures clean SDK state
+    const agentDef = this.config.getAgentDef(live.state.runtime as RuntimeType, live.state.model);
+    live.runtime = this.config.createRuntime(agentDef);
+
+    // Fresh session ID (same as spawn does)
+    const newSessionId = this.generateSessionId();
+    live.sessionId = newSessionId;
+    live.state.currentSessionId = newSessionId;
+
+    // Reset to waiting, keep identity (name, personality, workspace, title, memory)
+    live.processing = false;
+    live.messageQueue = [];
+    live.state.status = "waiting";
+    live.state.inferred = "respawned — ready for messages";
+    live.state.lastActivity = new Date().toISOString();
+
+    this.bus.publish("status_change", name, live.sessionId, { status: "waiting", event: "respawn" });
+    this.persistState();
+
+    console.log(`[fleet] ${name}: respawned (fresh runtime + session, identity preserved)`);
+    return `Agent "${name}" respawned. Identity, workspace, and memory preserved.`;
   }
 
   async kill(name: string): Promise<string> {
@@ -303,13 +349,16 @@ export class FleetManager {
   }
 
   private async processMessage(name: string, live: LiveAgent, text: string, sender: MessageSender): Promise<string> {
-    // Auto-recover from dead/error/sleeping — close stale session so a fresh one is created
+    // Auto-recover from dead/error/sleeping — full reset equivalent to spawn
     if (live.state.status === "dead" || live.state.status === "error" || live.state.status === "sleeping") {
-      console.log(`[fleet] ${name}: waking from ${live.state.status} — creating fresh session`);
+      console.log(`[fleet] ${name}: waking from ${live.state.status} — creating fresh runtime + session`);
       if (live.session) {
         try { live.session.close(); } catch {}
         live.session = null;
       }
+      // Recreate runtime to ensure clean SDK state (same as spawn/respawn)
+      const agentDef = this.config.getAgentDef(live.state.runtime as RuntimeType, live.state.model);
+      live.runtime = this.config.createRuntime(agentDef);
       live.state.status = "waiting";
     }
 
@@ -317,7 +366,7 @@ export class FleetManager {
     // to avoid "empty response" errors from stale Cursor SDK connections
     if (live.session && live.state.lastActivity) {
       const idleMs = Date.now() - new Date(live.state.lastActivity).getTime();
-      if (idleMs > SESSION_MAX_AGE_MS) {
+      if (idleMs > this.timeouts.sessionMaxAgeMs) {
         console.log(`[fleet] ${name}: session idle for ${Math.round(idleMs / 60_000)}min — closing, will reconnect on next message`);
         try { live.session.close(); } catch {}
         live.session = null;
@@ -357,7 +406,7 @@ export class FleetManager {
 
       return this.withTimeout(
         live.session!.send(finalText),
-        SEND_TIMEOUT_MS,
+        this.timeouts.sendTimeoutMs,
         `${name} send`,
       );
     };
@@ -387,12 +436,12 @@ export class FleetManager {
 
           if (isTimeout) {
             live.state.status = "dead";
-            live.state.inferred = `send timed out after ${SEND_TIMEOUT_MS / 60_000}min — session closed`;
+            live.state.inferred = `send timed out after ${this.timeouts.sendTimeoutMs / 60_000}min — session closed`;
             this.bus.publish("status_change", name, live.sessionId, { status: "dead" });
             this.logToSession(name, live.sessionId, { type: "timeout", error: lastErr.message });
             this.persistState();
             this.finishProcessing(name, live);
-            return `⚠️ Agent "${name}" timed out (${SEND_TIMEOUT_MS / 60_000}min). Session closed. Send another message to auto-recover.`;
+            return `⚠️ Agent "${name}" timed out (${this.timeouts.sendTimeoutMs / 60_000}min). Session closed. Send another message to auto-recover.`;
           }
 
           if (attempt === 0) {
@@ -413,7 +462,7 @@ export class FleetManager {
 
       live.state.messageCount++;
       live.state.status = "waiting";
-      live.state.inferred = "waiting for input";
+      live.state.inferred = "idle — ready for next task";
       live.state.lastActivity = new Date().toISOString();
       live.state.lastAgentMessage = reply!;
       this.bus.publish("agent_message", name, live.sessionId, { text: reply!, sender });
@@ -460,7 +509,7 @@ export class FleetManager {
         const dispLive = this.agents.get(DISPATCHER_NAME);
         if (dispLive && dispLive.state.status !== "error" && dispLive.state.status !== "dead") {
           const briefErr = errMsg.length > 200 ? errMsg.slice(0, 200) + "…" : errMsg;
-          this.send(DISPATCHER_NAME, `Agent "${name}" encountered an error: ${briefErr}\nStatus: ${live.state.status}. Please advise or reassign the task.`, name)
+          this.send(DISPATCHER_NAME, `Agent "${name}" hit an error: ${briefErr}\nStatus: ${live.state.status}. It will auto-recover when you send it another message — just re-send the task. Do NOT kill or re-hatch.`, name)
             .catch((e) => console.warn(`[fleet] failed to notify dispatcher of ${name} error: ${(e as Error).message?.slice(0, 60)}`));
         } else {
           console.warn(`[fleet] ${name}: error occurred but dispatcher is ${dispLive?.state.status ?? "absent"} — skipping error forwarding`);
@@ -522,12 +571,16 @@ export class FleetManager {
     const live = this.agents.get(name);
     if (!live) return "";
     const sessionsDir = getSessionsDir(name);
+    const history = readRecentHistory(name, 10);
 
     if (name === DISPATCHER_NAME) {
-      return buildDispatcherPreamble(this.getStatus(), this.config.workspaces, sessionsDir, this.getGoal());
+      return buildDispatcherPreamble(
+        this.getStatus(), this.config.workspaces, sessionsDir,
+        this.getGoal(), live.state.displayName || "Dispatcher", history,
+      );
     }
 
-    return buildAgentPreamble(name, live.state, sessionsDir, this.config.commsMode);
+    return buildAgentPreamble(name, live.state, sessionsDir, this.config.commsMode, history);
   }
 
   private requestSessionName(name: string, live: LiveAgent): void {
@@ -697,16 +750,23 @@ export class FleetManager {
 
     console.log(`[fleet] restoring ${Object.keys(saved.agents).length} agents from state...`);
     for (const [name, agentState] of Object.entries(saved.agents)) {
-      const workspacePath = this.resolveWorkspace(agentState.workspace);
+      let workspacePath = this.resolveWorkspace(agentState.workspace);
       if (!workspacePath) {
-        console.warn(`[fleet] skipping "${name}" — workspace "${agentState.workspace}" not found`);
-        continue;
+        // Workspace alias not registered — use saved workspacePath if available
+        if (agentState.workspacePath) {
+          workspacePath = agentState.workspacePath;
+          console.warn(`[fleet] "${name}" workspace alias "${agentState.workspace}" not registered — using saved path: ${workspacePath}`);
+          // Re-register the workspace so agent can function
+          this.config.workspaces.push({ alias: agentState.workspace, path: workspacePath });
+        } else {
+          console.warn(`[fleet] skipping "${name}" — workspace "${agentState.workspace}" has no saved path`);
+          continue;
+        }
       }
 
       const agentDef = this.config.getAgentDef(agentState.runtime as RuntimeType);
       const runtimeInstance = this.config.createRuntime(agentDef);
 
-      // On restart: active states become "sleeping" (session gone), handle legacy "idle" too
       // On restart: any non-stopped state becomes sleeping (session is gone)
       const rawStatus = agentState.status as string;
       const restoredStatus: AgentStatus = rawStatus === "stopped" ? "stopped" : "sleeping";

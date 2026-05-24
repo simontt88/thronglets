@@ -40,6 +40,12 @@ export async function startDispatcher(
   }
 
   if (fleet.hasAgent(DISPATCHER_NAME)) {
+    const state = fleet.getAgent(DISPATCHER_NAME);
+    if (state && (state.status === "dead" || state.status === "error")) {
+      console.log(`[dispatcher] exists but ${state.status} — respawning`);
+      await fleet.respawn(DISPATCHER_NAME);
+      return true;
+    }
     console.log("[dispatcher] already running");
     return true;
   }

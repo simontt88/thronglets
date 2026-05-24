@@ -51,6 +51,7 @@ function makeFleet() {
       apiKey: "test-key",
       model: model || "test-model",
     }),
+    commsMode: "hive",
   });
 
   return { fleet, bus, events };
@@ -203,11 +204,77 @@ describe("FleetManager", () => {
     });
   });
 
+  describe("respawn", () => {
+    it("preserves agent identity", async () => {
+      await fleet.spawn("alpha", "cursor", "ws1");
+      await fleet.send("alpha", "work on something");
+      const before = fleet.getAgent("alpha")!;
+      const oldPersonality = before.personality;
+
+      const result = await fleet.respawn("alpha");
+      expect(result).toContain("respawned");
+      expect(result).toContain("Identity");
+
+      const after = fleet.getAgent("alpha")!;
+      expect(after.name).toBe("alpha");
+      expect(after.personality).toBe(oldPersonality);
+      expect(after.workspace).toBe("ws1");
+      expect(after.status).toBe("waiting");
+    });
+
+    it("generates fresh session ID", async () => {
+      await fleet.spawn("alpha", "cursor", "ws1");
+      const oldSessionId = fleet.getAgent("alpha")!.currentSessionId;
+
+      await fleet.respawn("alpha");
+      const newSessionId = fleet.getAgent("alpha")!.currentSessionId;
+      expect(newSessionId).not.toBe(oldSessionId);
+    });
+
+    it("errors for missing agent", async () => {
+      const result = await fleet.respawn("ghost");
+      expect(result).toContain("not found");
+    });
+
+    it("agent works normally after respawn", async () => {
+      await fleet.spawn("alpha", "cursor", "ws1");
+      await fleet.send("alpha", "first task");
+      const countBefore = fleet.getAgent("alpha")!.messageCount;
+
+      await fleet.respawn("alpha");
+      const reply = await fleet.send("alpha", "second task");
+      expect(reply).toContain("reply from");
+      expect(fleet.getAgent("alpha")!.messageCount).toBe(countBefore + 1);
+    });
+  });
+
+  describe("auto-recovery", () => {
+    it("wakes sleeping agent on message", async () => {
+      await fleet.spawn("alpha", "cursor", "ws1");
+      await fleet.send("alpha", "task");
+
+      // Simulate sleeping state
+      const agent = fleet.getAgent("alpha")!;
+      (agent as any).status = "sleeping";
+
+      const reply = await fleet.send("alpha", "wake up");
+      expect(reply).toContain("reply from");
+      expect(fleet.getAgent("alpha")!.status).toBe("waiting");
+    });
+  });
+
   describe("workspace management", () => {
     it("lists initial workspaces", () => {
       const ws = fleet.listWorkspaces();
       expect(ws).toHaveLength(2);
       expect(ws.map((w) => w.alias)).toEqual(["ws1", "ws2"]);
+    });
+  });
+
+  describe("timeouts", () => {
+    it("uses default timeouts when not configured", () => {
+      expect(fleet.timeouts.sendTimeoutMs).toBe(60 * 60 * 1000);
+      expect(fleet.timeouts.sessionMaxAgeMs).toBe(30 * 60 * 1000);
     });
   });
 });

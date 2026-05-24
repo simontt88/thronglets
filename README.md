@@ -116,7 +116,9 @@ Open Telegram → `/hatch` → watch your first throng hatch. The web dashboard 
 | **Comms Control** | Three modes — `swarm` (free chat), `hive` (hub-and-spoke), `leash` (human-only). Configurable Telegram visibility |
 | **Multi-Platform** | Telegram (primary), Lark/Feishu, Discord. Lark and Discord require their respective SDK (`npm install @larksuiteoapi/node-sdk` or `discord.js`) |
 | **Web Dashboard** | Real-time fleet visualization with session history, live output streaming, and agent state |
-| **Auto-Recovery** | Heartbeat monitoring, dead agent detection, automatic restart without manual intervention |
+| **Persistent Identity** | Throngs survive restarts and crashes — same name, workspace, personality, and accumulated context. Sleeping and dead agents auto-wake on message |
+| **Auto-Recovery** | Heartbeat monitoring with configurable timeouts (1h send, 30m idle). Dead agents respawn with fresh runtime while preserving identity — no manual intervention |
+| **Context Recovery** | On wake, recent session history is injected into the agent's preamble so it remembers what it was working on |
 | **Session Logging** | Per-agent session logs (JSONL). Clear context without killing the creature |
 | **Workspace Isolation** | Each agent can be assigned to a different project directory |
 
@@ -328,6 +330,10 @@ interface Runtime {
 
 - [x] **npm CLI** — `npx thronglets` global install
 - [x] **Docker image** — `docker build` support
+- [x] **Persistent identity** — throngs survive restarts with name, workspace, and context preserved
+- [x] **Auto-recovery** — configurable timeouts, respawn with identity, context injection on wake
+- [ ] **Reward system** — pet your throng when it does well. Interactions are logged and feed back into behavior optimization
+- [ ] **Chill mode gamification** — creature mood reflects real performance (tasks completed, errors, user feedback). Not just cosmetic — part of the reward loop
 - [ ] **Memory layer** — persistent cross-session context per throng
 - [ ] **Slack transport** — Slack bot adapter
 - [ ] **Session recall** — search and resume past agent sessions

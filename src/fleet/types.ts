@@ -26,6 +26,7 @@ export interface FleetEvent {
 
 export interface AgentState {
   name: string;
+  displayName?: string;
   title?: string;
   personality?: string;
   runtime: RuntimeType;

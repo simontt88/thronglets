@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, readdirSync } from "fs";
 import { join } from "path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { FleetState, WorkspaceEntry } from "./types.js";
@@ -98,6 +98,49 @@ export function removeWorkspace(alias: string): string {
   workspaces.splice(idx, 1);
   saveWorkspaces(workspaces);
   return `Workspace "${alias}" removed`;
+}
+
+export function readRecentHistory(agentName: string, maxMessages: number = 10): string {
+  const dir = getSessionsDir(agentName);
+  if (!existsSync(dir)) return "";
+
+  // Find the most recent session file
+  let files: string[];
+  try {
+    files = readdirSync(dir).filter((f) => f.endsWith(".jsonl")).sort().reverse();
+  } catch {
+    return "";
+  }
+
+  if (files.length === 0) return "";
+
+  const lines: string[] = [];
+
+  // Read from most recent session files until we have enough messages
+  for (const file of files.slice(0, 3)) {
+    try {
+      const content = readFileSync(join(dir, file), "utf-8").trim();
+      if (!content) continue;
+      const sessionLines = content.split("\n").filter(Boolean);
+      for (const line of sessionLines) {
+        try {
+          const entry = JSON.parse(line);
+          if (entry.type === "user_message" || entry.type === "agent_message") {
+            const role = entry.type === "user_message" ? "→" : "←";
+            const sender = entry.sender || "user";
+            const text = (entry.text || "").slice(0, 150);
+            lines.push(`${role} [${sender}] ${text}`);
+          }
+        } catch { /* skip unparseable lines */ }
+      }
+    } catch { /* skip unreadable files */ }
+    if (lines.length >= maxMessages) break;
+  }
+
+  if (lines.length === 0) return "";
+
+  // Return last N messages, most recent last
+  return lines.slice(-maxMessages).join("\n");
 }
 
 export function renameWorkspace(oldAlias: string, newAlias: string): string {

@@ -1,3 +1,6 @@
+import events from "node:events";
+events.setMaxListeners(50);
+
 import { loadConfig, type BridgeConfig, type AgentDef, type RuntimeType } from "./config.js";
 import { TelegramTransport } from "./transports/telegram.js";
 import { CursorRuntime } from "./runtimes/cursor.js";
@@ -101,6 +104,7 @@ async function main() {
       return { name: runtime, runtime, apiKey: "", model: model || "claude-sonnet-4-6" };
     },
     commsMode: config.fleet.comms,
+    timeouts: config.fleet.timeouts,
   });
 
   await fleet.restore();
@@ -120,9 +124,25 @@ async function main() {
     if (!chatId) return;
     if (visibility.interAgent === "summary") {
       const label = direction === "sent" ? "📤" : "📥";
-      transport.sendReply(chatId, `${label} ${from} → ${to}`).catch(() => {});
+      // Include content preview for sent messages
+      const agent = fleet.getAgent(from);
+      const preview = agent?.lastAgentMessage
+        ? `: ${agent.lastAgentMessage.slice(0, 100)}${agent.lastAgentMessage.length > 100 ? "…" : ""}`
+        : "";
+      transport.sendReply(chatId, `${label} ${from} → ${to}${direction === "sent" ? preview : ""}`).catch(() => {});
     }
-    // "full" — handled by dispatcherBroadcast below
+  });
+
+  // Wire onReplyRouted — shows actual reply content when agents respond to each other
+  fleet.onReplyRouted((fromAgent, toAgent, reply) => {
+    if (visibility.interAgent === "off") return;
+    const chatId = getNotifyChatId();
+    if (!chatId) return;
+    if (visibility.interAgent === "full") {
+      const truncated = reply.length > 1500 ? reply.slice(0, 1500) + "…" : reply;
+      transport.sendReply(chatId, `[${fromAgent} → ${toAgent}]\n${truncated}`).catch(() => {});
+    }
+    // summary mode previews are handled by onPeerMessage
   });
 
   fleet.onDispatcherBroadcast((reply, fromAgent) => {
@@ -133,7 +153,23 @@ async function main() {
       const truncated = reply.length > 1500 ? reply.slice(0, 1500) + "…" : reply;
       transport.sendReply(chatId, `[dispatcher · re:${fromAgent}]\n${truncated}`).catch(() => {});
     }
-    // "summary" — already handled by onPeerMessage
+  });
+
+  // Task completion notifications — only in "full" visibility mode
+  // In "summary" mode, onPeerMessage already covers completions via "📤 agent → dispatcher" previews
+  bus.onEvent((event) => {
+    if (event.type !== "status_change") return;
+    if (visibility.interAgent !== "full") return;
+    const chatId = getNotifyChatId();
+    if (!chatId) return;
+    const payload = event.payload as { status?: string } | undefined;
+    if (!payload) return;
+
+    if (payload.status === "waiting" && event.agentName !== DISPATCHER_AGENT_NAME) {
+      const agent = fleet.getAgent(event.agentName);
+      const lastTask = agent?.lastUserMessage?.slice(0, 80) || "task";
+      transport.sendReply(chatId, `✅ ${event.agentName} finished: ${lastTask}`).catch(() => {});
+    }
   });
 
   // Start dispatcher + server
@@ -165,29 +201,68 @@ async function main() {
   console.log(`\n  Commands: /hatch /kill /fleet /clear /change /status /help`);
   console.log(`  Mention:  @name message | @all message\n`);
 
-  // Dispatcher auto-recovery heartbeat
+  // Dispatcher auto-recovery + idle-fleet poke heartbeat
   let dispatcherRecovering = false;
+  let lastIdlePoke = 0;
+  const IDLE_POKE_ENABLED = true;
+  const IDLE_POKE_DEBOUNCE_MS = 10 * 60 * 1000;
   setInterval(async () => {
     const s = fleet.getStatus();
+    const nonDispatcher = s.agents.filter((a) => a.name !== DISPATCHER_AGENT_NAME);
     console.log(`[heartbeat] ${new Date().toISOString()} fleet=${s.total} working=${s.working} dead=${s.dead}`);
 
     if (dispatcherConfig.enabled && !dispatcherRecovering) {
       const disp = fleet.getAgent(DISPATCHER_AGENT_NAME);
-      if (!disp || disp.status === "dead" || disp.status === "error") {
+      if (!disp) {
+        // Dispatcher was never spawned (missing from state) — start fresh
         dispatcherRecovering = true;
-        console.log(`[heartbeat] dispatcher is ${disp?.status ?? "gone"} — auto-recovering...`);
+        console.log(`[heartbeat] dispatcher absent — starting fresh...`);
         try {
-          if (disp) await fleet.kill(DISPATCHER_AGENT_NAME);
           const ok = await startDispatcher(fleet, bus, config, workspaces);
-          console.log(`[heartbeat] dispatcher recovery: ${ok ? "success" : "failed"}`);
+          console.log(`[heartbeat] dispatcher start: ${ok ? "success" : "failed"}`);
           const chatId = getNotifyChatId();
           if (ok && chatId) {
-            transport.sendReply(chatId, "🔄 Dispatcher auto-recovered from crash").catch(() => {});
+            transport.sendReply(chatId, "🔄 Dispatcher started").catch(() => {});
           }
         } catch (e) {
-          console.error(`[heartbeat] dispatcher recovery failed: ${e instanceof Error ? e.message : e}`);
+          console.error(`[heartbeat] dispatcher start failed: ${e instanceof Error ? e.message : e}`);
         } finally {
           dispatcherRecovering = false;
+        }
+      } else if (disp.status === "dead" || disp.status === "error") {
+        // Dispatcher exists but crashed — respawn (preserve identity)
+        dispatcherRecovering = true;
+        console.log(`[heartbeat] dispatcher is ${disp.status} — respawning (preserving identity)...`);
+        try {
+          const result = await fleet.respawn(DISPATCHER_AGENT_NAME);
+          console.log(`[heartbeat] dispatcher respawn: ${result}`);
+          const chatId = getNotifyChatId();
+          if (chatId) {
+            transport.sendReply(chatId, "🔄 Dispatcher respawned (identity preserved)").catch(() => {});
+          }
+        } catch (e) {
+          console.error(`[heartbeat] dispatcher respawn failed: ${e instanceof Error ? e.message : e}`);
+        } finally {
+          dispatcherRecovering = false;
+        }
+      }
+
+      // Idle-fleet poke: if all throngs are sleeping/dead, nudge dispatcher
+      const allIdle = nonDispatcher.length > 0 &&
+        nonDispatcher.every((a) => a.status === "sleeping" || a.status === "dead");
+      const now = Date.now();
+      if (IDLE_POKE_ENABLED && allIdle && !dispatcherRecovering && (now - lastIdlePoke) > IDLE_POKE_DEBOUNCE_MS) {
+        const dispAgent = fleet.getAgent(DISPATCHER_AGENT_NAME);
+        if (dispAgent && dispAgent.status !== "working") {
+          lastIdlePoke = now;
+          const goal = fleet.getGoal();
+          const msg = goal
+            ? `[IDLE_POKE] All throngs are sleeping/dead. Goal: ${goal}\nReview what's stuck, decide whether to retry or report to user.`
+            : `[IDLE_POKE] All throngs are sleeping/dead. No goal set. Ask the user what to do.`;
+          console.log(`[heartbeat] all throngs idle — poking dispatcher`);
+          fleet.send(DISPATCHER_AGENT_NAME, msg, "system").catch((e) => {
+            console.warn(`[heartbeat] idle poke failed: ${e instanceof Error ? e.message : e}`);
+          });
         }
       }
     }

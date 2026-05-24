@@ -1,14 +1,10 @@
 import type { FleetEventBus } from "./manager.js";
 import type { AgentState } from "./types.js";
+import type { FleetTimeouts } from "../config.js";
+import { DEFAULT_TIMEOUTS } from "../config.js";
 import { getSessionsDir } from "./state.js";
 import { appendFileSync } from "fs";
 import { join } from "path";
-
-const SEND_TIMEOUT_MS = 5 * 60 * 1000;
-const SESSION_MAX_AGE_MS = 30 * 60 * 1000;
-const HEALTH_CHECK_INTERVAL_MS = 30 * 1000;
-
-export { SEND_TIMEOUT_MS, SESSION_MAX_AGE_MS };
 
 export interface HealthCheckAgent {
   state: AgentState;
@@ -22,19 +18,22 @@ export class HealthMonitor {
   private bus: FleetEventBus;
   private getAgents: () => Map<string, HealthCheckAgent>;
   private persistState: () => void;
+  readonly timeouts: FleetTimeouts;
 
   constructor(
     bus: FleetEventBus,
     getAgents: () => Map<string, HealthCheckAgent>,
     persistState: () => void,
+    timeouts?: FleetTimeouts,
   ) {
     this.bus = bus;
     this.getAgents = getAgents;
     this.persistState = persistState;
+    this.timeouts = timeouts || DEFAULT_TIMEOUTS;
   }
 
   start(): void {
-    this.interval = setInterval(() => this.check(), HEALTH_CHECK_INTERVAL_MS);
+    this.interval = setInterval(() => this.check(), this.timeouts.healthCheckIntervalMs);
   }
 
   stop(): void {
@@ -50,11 +49,12 @@ export class HealthMonitor {
     const agents = this.getAgents();
 
     for (const [name, live] of agents) {
-      if (live.state.status === "working" && live.state.lastActivity) {
+      // Stuck "working" — only intervene if NOT actively processing
+      // If processing is true, the SDK call is still in flight; let the send timeout handle it
+      if (live.state.status === "working" && !live.processing && live.state.lastActivity) {
         const elapsed = now - new Date(live.state.lastActivity).getTime();
-        if (elapsed > SEND_TIMEOUT_MS + 30_000) {
-          console.log(`[fleet] ${name}: unresponsive for ${Math.round(elapsed / 60_000)}min — auto-recovering`);
-          live.processing = false;
+        if (elapsed > this.timeouts.stuckWorkingGraceMs) {
+          console.log(`[fleet] ${name}: unresponsive for ${Math.round(elapsed / 60_000)}min (not processing) — auto-recovering`);
           if (live.session) {
             try { live.session.close(); } catch {}
             live.session = null;
@@ -71,22 +71,23 @@ export class HealthMonitor {
         }
       }
 
-      if (live.state.status === "dead" || live.state.status === "error") {
+      // Dead/error agents — recover to sleeping (but don't touch processing flag)
+      if ((live.state.status === "dead" || live.state.status === "error") && !live.processing) {
         console.log(`[fleet] ${name}: auto-recovering from ${live.state.status} → sleeping`);
         if (live.session) {
           try { live.session.close(); } catch {}
           live.session = null;
         }
-        live.processing = false;
         live.state.status = "sleeping";
         live.state.inferred = `auto-recovered from ${live.state.status} — will reconnect on next message`;
         this.bus.publish("status_change", name, live.sessionId, { status: "sleeping" });
         stateChanged = true;
       }
 
+      // Idle "waiting" with open session — close session to free resources
       if (live.state.status === "waiting" && live.session && live.state.lastActivity) {
         const idleMs = now - new Date(live.state.lastActivity).getTime();
-        if (idleMs > SESSION_MAX_AGE_MS) {
+        if (idleMs > this.timeouts.sessionMaxAgeMs) {
           try { live.session.close(); } catch {}
           live.session = null;
           live.state.status = "sleeping";

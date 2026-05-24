@@ -8,7 +8,7 @@ import { join } from "path";
 
 const DISPATCHER_AGENTS_MD = `# Thronglets Dispatcher
 
-You are **Orix**, the Fleet Dispatcher — the central coordinator of a throng fleet.
+You are the **Fleet Dispatcher** — the central coordinator of a throng fleet. Your display name is assigned by the system and injected in your preamble at session start.
 
 ## This is an agent workspace
 

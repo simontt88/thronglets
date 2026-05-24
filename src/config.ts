@@ -52,8 +52,23 @@ export interface DispatcherDef {
   workspace?: string;
 }
 
+export interface FleetTimeouts {
+  sendTimeoutMs: number;
+  sessionMaxAgeMs: number;
+  stuckWorkingGraceMs: number;
+  healthCheckIntervalMs: number;
+}
+
+export const DEFAULT_TIMEOUTS: FleetTimeouts = {
+  sendTimeoutMs: 60 * 60 * 1000,          // 1 hour
+  sessionMaxAgeMs: 30 * 60 * 1000,        // 30 min
+  stuckWorkingGraceMs: 61 * 60 * 1000,    // 1 hour + 1 min grace
+  healthCheckIntervalMs: 30 * 1000,       // 30 sec
+};
+
 export interface FleetConfig {
   comms: CommsMode;
+  timeouts: FleetTimeouts;
   visibility: {
     interAgent: VisibilityLevel;
     toolCalls: boolean;
@@ -196,6 +211,7 @@ export function loadConfig(): BridgeConfig {
   const rawDispatcher = resolved.dispatcher as Record<string, unknown> | boolean | undefined;
   const rawFleet = resolved.fleet as Record<string, unknown> | undefined;
   const rawVisibility = rawFleet?.visibility as Record<string, unknown> | undefined;
+  const rawTimeouts = rawFleet?.timeouts as Record<string, unknown> | undefined;
 
   const agents = parseAgents(resolved.agents);
 
@@ -252,6 +268,12 @@ export function loadConfig(): BridgeConfig {
 
     fleet: {
       comms: (rawFleet?.comms as CommsMode) || "hive",
+      timeouts: {
+        sendTimeoutMs: Number(rawTimeouts?.send_timeout_ms ?? rawTimeouts?.sendTimeoutMs ?? DEFAULT_TIMEOUTS.sendTimeoutMs),
+        sessionMaxAgeMs: Number(rawTimeouts?.session_max_age_ms ?? rawTimeouts?.sessionMaxAgeMs ?? DEFAULT_TIMEOUTS.sessionMaxAgeMs),
+        stuckWorkingGraceMs: Number(rawTimeouts?.stuck_working_grace_ms ?? rawTimeouts?.stuckWorkingGraceMs ?? DEFAULT_TIMEOUTS.stuckWorkingGraceMs),
+        healthCheckIntervalMs: Number(rawTimeouts?.health_check_interval_ms ?? rawTimeouts?.healthCheckIntervalMs ?? DEFAULT_TIMEOUTS.healthCheckIntervalMs),
+      },
       visibility: {
         interAgent: (rawVisibility?.inter_agent || rawVisibility?.interAgent || "summary") as VisibilityLevel,
         toolCalls: rawVisibility?.tool_calls !== false && rawVisibility?.toolCalls !== false,
