@@ -685,8 +685,8 @@ strong { font-weight: 700; color: var(--t-1); }
 }
 .chatbar-inner {
   pointer-events: all;
-  display: flex; align-items: center; gap: 8px;
-  height: 46px; padding: 0 6px 0 4px;
+  display: flex; align-items: flex-end; gap: 8px;
+  min-height: 46px; padding: 6px 6px 6px 4px;
   background: var(--bg-2); border: 2px solid var(--border-2);
   border-radius: 14px;
   box-shadow: 0 -2px 16px -6px rgba(180,120,20,0.1), var(--shadow-card);
@@ -752,6 +752,8 @@ strong { font-weight: 700; color: var(--t-1); }
   flex: 1; font-size: 13px; padding: 6px 4px;
   min-width: 0; color: var(--t-1);
   resize: none; overflow-y: auto;
+  max-height: 160px; line-height: 1.45;
+  word-break: break-word; overflow-wrap: break-word;
   line-height: 1.4; max-height: 120px;
   border: none; background: transparent; outline: none;
   font-family: inherit; font-weight: 500;
@@ -1028,7 +1030,7 @@ strong { font-weight: 700; color: var(--t-1); }
   }
 
   .chatbar { padding: 0 8px 6px; }
-  .chatbar-inner { height: 40px; padding: 0 4px; gap: 6px; }
+  .chatbar-inner { min-height: 40px; padding: 4px 4px; gap: 6px; }
   .agent-selector-btn { height: 30px; padding: 0 8px; font-size: 11px; }
   .chatbar-input { font-size: 12px; }
   .chatbar-hints { display: none; }
