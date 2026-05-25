@@ -248,6 +248,6 @@ All provisioning functions use `writeIfMissing` / `existsSync` guards — they o
 
 ### Config directory
 
-The canonical config directory is `~/.thronglets`. On startup, older directories (`~/.agent-bridge`, `~/.kenyalang`) are auto-migrated if found. Override with `THRONGLETS_HOME` env var.
+The canonical config directory is `~/.thronglets`. On startup, legacy directories are auto-migrated if found. Override with `THRONGLETS_HOME` env var.
 
 All path references in the codebase import `GLOBAL_CONFIG_DIR` from `config.ts` — if you add new code that needs the config dir, always use this constant.

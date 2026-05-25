@@ -204,7 +204,7 @@ async function main() {
   // Dispatcher auto-recovery + idle-fleet poke heartbeat
   let dispatcherRecovering = false;
   let lastIdlePoke = 0;
-  const IDLE_POKE_ENABLED = true;
+  const IDLE_POKE_ENABLED = false;
   const IDLE_POKE_DEBOUNCE_MS = 10 * 60 * 1000;
   setInterval(async () => {
     const s = fleet.getStatus();

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = join(__dirname, "..");
@@ -11,7 +11,7 @@ const tsx = join(root, "node_modules", "tsx", "dist", "esm", "index.mjs");
 try {
   execFileSync(process.execPath, ["--import", tsx, cli, ...process.argv.slice(2)], {
     stdio: "inherit",
-    cwd: process.cwd(),
+    cwd: resolve(process.cwd()),
   });
 } catch (err) {
   process.exit(err.status || 1);
