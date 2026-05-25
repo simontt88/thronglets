@@ -16,6 +16,7 @@ import type { Runtime } from "./runtimes/interface.js";
 import { startDispatcher, getDispatcherConfig, DISPATCHER_AGENT_NAME } from "./fleet/dispatcher.js";
 import { createPostReplyHook } from "./fleet/tools.js";
 import { setupCommandRouter } from "./commands/telegram.js";
+import { NotificationThrottle } from "./notifications.js";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { readFileSync } from "fs";
@@ -156,7 +157,6 @@ async function main() {
   });
 
   // Task completion notifications — only in "full" visibility mode
-  // In "summary" mode, onPeerMessage already covers completions via "📤 agent → dispatcher" previews
   bus.onEvent((event) => {
     if (event.type !== "status_change") return;
     if (visibility.interAgent !== "full") return;
@@ -169,6 +169,17 @@ async function main() {
       const agent = fleet.getAgent(event.agentName);
       const lastTask = agent?.lastUserMessage?.slice(0, 80) || "task";
       transport.sendReply(chatId, `✅ ${event.agentName} finished: ${lastTask}`).catch(() => {});
+    }
+  });
+
+  // Notification throttle for dispatcher→user messages
+  const notifThrottle = new NotificationThrottle(config.fleet.notificationCooldownMs);
+
+  fleet.onUserNotification((text, level) => {
+    const chatId = getNotifyChatId();
+    if (!chatId) return;
+    if (level === "critical" || notifThrottle.shouldSend("dispatcher-notify", level as "info", text)) {
+      transport.sendReply(chatId, text).catch(() => {});
     }
   });
 
@@ -201,11 +212,23 @@ async function main() {
   console.log(`\n  Commands: /hatch /kill /fleet /clear /change /status /help`);
   console.log(`  Mention:  @name message | @all message\n`);
 
-  // Dispatcher auto-recovery + idle-fleet poke heartbeat
+  // Dispatcher auto-recovery + smart IDLE_POKE heartbeat
   let dispatcherRecovering = false;
   let lastIdlePoke = 0;
-  const IDLE_POKE_ENABLED = false;
-  const IDLE_POKE_DEBOUNCE_MS = 10 * 60 * 1000;
+  let idlePokeCount = 0;
+  let lastUserActivity = Date.now();
+  const pokeConfig = config.fleet.idlePoke;
+  const digestConfig = config.fleet.digest;
+
+  // Track user activity for digest timer
+  bus.onEvent((event) => {
+    if (event.type === "user_message") {
+      lastUserActivity = Date.now();
+      idlePokeCount = 0;
+      notifThrottle.resetAll();
+    }
+  });
+
   setInterval(async () => {
     const s = fleet.getStatus();
     const nonDispatcher = s.agents.filter((a) => a.name !== DISPATCHER_AGENT_NAME);
@@ -214,7 +237,6 @@ async function main() {
     if (dispatcherConfig.enabled && !dispatcherRecovering) {
       const disp = fleet.getAgent(DISPATCHER_AGENT_NAME);
       if (!disp) {
-        // Dispatcher was never spawned (missing from state) — start fresh
         dispatcherRecovering = true;
         console.log(`[heartbeat] dispatcher absent — starting fresh...`);
         try {
@@ -230,7 +252,6 @@ async function main() {
           dispatcherRecovering = false;
         }
       } else if (disp.status === "dead" || disp.status === "error") {
-        // Dispatcher exists but crashed — respawn (preserve identity)
         dispatcherRecovering = true;
         console.log(`[heartbeat] dispatcher is ${disp.status} — respawning (preserving identity)...`);
         try {
@@ -247,22 +268,39 @@ async function main() {
         }
       }
 
-      // Idle-fleet poke: if all throngs are sleeping/dead, nudge dispatcher
+      // Smart IDLE_POKE: config-driven, debounced, capped, with task ledger context
       const allIdle = nonDispatcher.length > 0 &&
-        nonDispatcher.every((a) => a.status === "sleeping" || a.status === "dead");
+        nonDispatcher.every((a) => a.status === "sleeping" || a.status === "dead" || a.status === "waiting");
       const now = Date.now();
-      if (IDLE_POKE_ENABLED && allIdle && !dispatcherRecovering && (now - lastIdlePoke) > IDLE_POKE_DEBOUNCE_MS) {
+      if (pokeConfig.enabled && allIdle && !dispatcherRecovering && (now - lastIdlePoke) > pokeConfig.debounceMs) {
         const dispAgent = fleet.getAgent(DISPATCHER_AGENT_NAME);
-        if (dispAgent && dispAgent.status !== "working") {
+        if (dispAgent && dispAgent.status !== "working" && idlePokeCount < pokeConfig.maxPerCycle) {
           lastIdlePoke = now;
+          idlePokeCount++;
           const goal = fleet.getGoal();
-          const msg = goal
-            ? `[IDLE_POKE] All throngs are sleeping/dead. Goal: ${goal}\nReview what's stuck, decide whether to retry or report to user.`
-            : `[IDLE_POKE] All throngs are sleeping/dead. No goal set. Ask the user what to do.`;
-          console.log(`[heartbeat] all throngs idle — poking dispatcher`);
+          const taskSummary = fleet.getTaskLedgerSummary();
+          const parts = [`[IDLE_POKE ${idlePokeCount}/${pokeConfig.maxPerCycle}] All throngs idle.`];
+          if (goal) parts.push(`Goal: ${goal}`);
+          if (taskSummary) parts.push(`Recent tasks: ${taskSummary}`);
+          parts.push(`Review task log with [FLEET:fleet_task_log:{}], then assign new work or notify user of progress.`);
+          const msg = parts.join("\n");
+          console.log(`[heartbeat] all throngs idle — poking dispatcher (${idlePokeCount}/${pokeConfig.maxPerCycle})`);
           fleet.send(DISPATCHER_AGENT_NAME, msg, "system").catch((e) => {
             console.warn(`[heartbeat] idle poke failed: ${e instanceof Error ? e.message : e}`);
           });
+        }
+      }
+
+      // Progress digest: auto-summary after sustained user silence
+      if (digestConfig.enabled && (now - lastUserActivity) > digestConfig.silenceThresholdMs) {
+        if (notifThrottle.shouldSend("digest", "info", "auto-digest")) {
+          const taskSummary = fleet.getTaskLedgerSummary();
+          const chatId = getNotifyChatId();
+          if (chatId && taskSummary) {
+            const digestMsg = `📊 Fleet digest (${Math.round((now - lastUserActivity) / 3600_000)}h since last message):\n${taskSummary}`;
+            transport.sendReply(chatId, digestMsg).catch(() => {});
+            console.log(`[heartbeat] sent progress digest to user`);
+          }
         }
       }
     }

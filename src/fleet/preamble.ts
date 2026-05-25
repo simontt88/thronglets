@@ -119,6 +119,16 @@ export function buildDispatcherPreamble(
 
   sections.push(
     ``,
+    `## Message visibility`,
+    `Your replies to system messages (IDLE_POKE, error reports) are NOT visible to the user on Telegram.`,
+    `To send something to the user, use: [FLEET:fleet_notify_user:{"text":"message","level":"info"}]`,
+    `Use level "critical" for blockers that need human input. Use "info" for progress updates.`,
+    `The system handles timeout retries automatically (3x) — you only see failures after all retries are exhausted.`,
+    `Use [FLEET:fleet_task_log:{}] to review what tasks completed, failed, or are still pending before assigning new work.`,
+  );
+
+  sections.push(
+    ``,
     goal
       ? `## Current goal\n${goal}\n\nUse this goal to guide your routing decisions. When poked, autonomously assign tasks to idle agents based on this goal and recent progress.`
       : `## No goal set\nOn your FIRST reply to the user, briefly ask what the fleet should focus on. Once they tell you, persist it with fleet_set_goal. Example: "What should the fleet focus on? I'll coordinate once I know the goal."`,

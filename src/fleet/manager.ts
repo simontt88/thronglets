@@ -66,6 +66,16 @@ export interface FleetManagerConfig {
 export type ReplyRoutingCallback = (fromAgent: string, toAgent: string, reply: string) => void;
 export type PeerMessageCallback = (fromAgent: string, toAgent: string, direction: "sent" | "replied") => void;
 export type DispatcherBroadcastCallback = (reply: string, triggerAgent: string) => void;
+export type UserNotificationCallback = (text: string, level: string) => void;
+
+export interface TaskRecord {
+  assignedAt: string;
+  agent: string;
+  task: string;
+  status: "dispatched" | "completed" | "failed";
+  completedAt?: string;
+  result?: string;
+}
 
 export class FleetManager {
   private agents = new Map<string, LiveAgent>();
@@ -76,6 +86,8 @@ export class FleetManager {
   private replyRoutingCallback: ReplyRoutingCallback | null = null;
   private peerMessageCallback: PeerMessageCallback | null = null;
   private dispatcherBroadcastCallback: DispatcherBroadcastCallback | null = null;
+  private userNotificationCallback: UserNotificationCallback | null = null;
+  private taskLedger: TaskRecord[] = [];
 
   constructor(bus: FleetEventBus, config: FleetManagerConfig) {
     this.bus = bus;
@@ -107,6 +119,76 @@ export class FleetManager {
 
   onDispatcherBroadcast(callback: DispatcherBroadcastCallback): void {
     this.dispatcherBroadcastCallback = callback;
+  }
+
+  onUserNotification(callback: UserNotificationCallback): void {
+    this.userNotificationCallback = callback;
+  }
+
+  emitUserNotification(text: string, level: string): void {
+    this.userNotificationCallback?.(text, level);
+  }
+
+  recordTask(agent: string, task: string): void {
+    this.taskLedger.push({
+      assignedAt: new Date().toISOString(),
+      agent,
+      task: task.slice(0, 200),
+      status: "dispatched",
+    });
+    if (this.taskLedger.length > 100) {
+      this.taskLedger = this.taskLedger.slice(-50);
+    }
+  }
+
+  completeTask(agent: string, status: "completed" | "failed", result?: string): void {
+    for (let i = this.taskLedger.length - 1; i >= 0; i--) {
+      if (this.taskLedger[i].agent === agent && this.taskLedger[i].status === "dispatched") {
+        this.taskLedger[i].status = status;
+        this.taskLedger[i].completedAt = new Date().toISOString();
+        if (result) this.taskLedger[i].result = result.slice(0, 100);
+        break;
+      }
+    }
+  }
+
+  getRecentTaskLog(limit = 20): string {
+    const recent = this.taskLedger.slice(-limit);
+    if (recent.length === 0) return "No tasks recorded yet.";
+
+    const completed = recent.filter((t) => t.status === "completed").length;
+    const failed = recent.filter((t) => t.status === "failed").length;
+    const pending = recent.filter((t) => t.status === "dispatched").length;
+    const header = `Tasks: ${completed} completed, ${failed} failed, ${pending} pending`;
+
+    const lines = recent.map((t) => {
+      const status = t.status === "completed" ? "✓" : t.status === "failed" ? "✗" : "…";
+      const result = t.result ? ` → ${t.result}` : "";
+      return `  ${status} ${t.agent}: ${t.task.slice(0, 80)}${result}`;
+    });
+
+    return `${header}\n${lines.join("\n")}`;
+  }
+
+  getTaskLedgerSummary(): string {
+    const recent = this.taskLedger.slice(-20);
+    if (recent.length === 0) return "";
+
+    const completed = recent.filter((t) => t.status === "completed");
+    const failed = recent.filter((t) => t.status === "failed");
+    const pending = recent.filter((t) => t.status === "dispatched");
+
+    const parts: string[] = [];
+    if (completed.length > 0) {
+      parts.push(`${completed.length} completed: ${completed.map((t) => `${t.agent}(${t.task.slice(0, 40)})`).join(", ")}`);
+    }
+    if (failed.length > 0) {
+      parts.push(`${failed.length} failed: ${failed.map((t) => t.agent).join(", ")}`);
+    }
+    if (pending.length > 0) {
+      parts.push(`${pending.length} pending`);
+    }
+    return parts.join(" | ");
   }
 
   stopHealthCheck(): void {
@@ -332,6 +414,11 @@ export class FleetManager {
       return `Agent "${name}" not found. Use /new to spawn.`;
     }
 
+    // Track tasks dispatched by the dispatcher to other agents
+    if (sender === DISPATCHER_NAME && name !== DISPATCHER_NAME) {
+      this.recordTask(name, text);
+    }
+
     // Notify about peer-to-peer messages (not user→agent)
     if (sender !== "user" && this.peerMessageCallback) {
       this.peerMessageCallback(sender as string, name, "sent");
@@ -422,8 +509,8 @@ export class FleetManager {
       let reply: string;
       let lastErr: Error | null = null;
 
-      // Retry up to 2 times (initial + 1 retry with fresh session)
-      for (let attempt = 0; attempt < 2; attempt++) {
+      const MAX_ATTEMPTS = 3;
+      for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
         try {
           reply = await attemptSend();
           lastErr = null;
@@ -431,26 +518,34 @@ export class FleetManager {
         } catch (err) {
           lastErr = err instanceof Error ? err : new Error(String(err));
           const isTimeout = lastErr.message.includes("Timeout");
-          console.log(`[fleet] ${name}: attempt ${attempt + 1} failed (${isTimeout ? "TIMEOUT" : lastErr.message.slice(0, 80)})`);
+          console.log(`[fleet] ${name}: attempt ${attempt + 1}/${MAX_ATTEMPTS} failed (${isTimeout ? "TIMEOUT" : lastErr.message.slice(0, 80)})`);
           closeSession();
+          this.logToSession(name, live.sessionId, { type: isTimeout ? "timeout" : "error", error: lastErr.message, attempt: attempt + 1 });
+
+          if (isTimeout && attempt < MAX_ATTEMPTS - 1) {
+            live.state.status = "sleeping";
+            live.state.inferred = `timeout retry ${attempt + 1}/${MAX_ATTEMPTS} — retrying silently`;
+            this.persistState();
+            console.log(`[fleet] ${name}: silent timeout retry ${attempt + 2}/${MAX_ATTEMPTS}...`);
+            continue;
+          }
 
           if (isTimeout) {
             live.state.status = "dead";
-            live.state.inferred = `send timed out after ${this.timeouts.sendTimeoutMs / 60_000}min — session closed`;
+            live.state.inferred = `send timed out ${MAX_ATTEMPTS}x — session closed`;
             this.bus.publish("status_change", name, live.sessionId, { status: "dead" });
-            this.logToSession(name, live.sessionId, { type: "timeout", error: lastErr.message });
+            this.completeTask(name, "failed", `timeout ${MAX_ATTEMPTS}x`);
             this.persistState();
             this.finishProcessing(name, live);
-            return `⚠️ Agent "${name}" timed out (${this.timeouts.sendTimeoutMs / 60_000}min). Session closed. Send another message to auto-recover.`;
+            return `⚠️ Agent "${name}" timed out ${MAX_ATTEMPTS}x. Session closed. Send another message to auto-recover.`;
           }
 
-          if (attempt === 0) {
+          if (attempt < MAX_ATTEMPTS - 1) {
             console.log(`[fleet] ${name}: retrying with fresh session...`);
           }
         }
       }
 
-      // Both attempts failed
       if (lastErr) {
         throw lastErr;
       }
@@ -468,15 +563,19 @@ export class FleetManager {
       this.bus.publish("agent_message", name, live.sessionId, { text: reply!, sender });
       this.bus.publish("status_change", name, live.sessionId, { status: "waiting" });
       this.logToSession(name, live.sessionId, { type: "agent_message", text: reply!, replyTo: sender });
+
+      if (sender === DISPATCHER_NAME && name !== DISPATCHER_NAME) {
+        this.completeTask(name, "completed", reply!);
+      }
       this.persistState();
 
       // Reply routing: if message was from another agent, route reply back
       if (sender !== "user") {
         this.routeReplyToSender(name, sender, reply!);
 
-        // When dispatcher replies to an agent, broadcast to user (Telegram)
-        // so the user sees the dispatcher's summary/status updates
-        if (name === DISPATCHER_NAME && this.dispatcherBroadcastCallback && reply!.trim()) {
+        // Broadcast dispatcher replies to TG only for peer agent messages,
+        // NOT for system-initiated messages (IDLE_POKE, error reports)
+        if (name === DISPATCHER_NAME && this.dispatcherBroadcastCallback && reply!.trim() && sender !== "system") {
           this.dispatcherBroadcastCallback(reply!, sender as string);
         }
       }
@@ -499,13 +598,13 @@ export class FleetManager {
       this.bus.publish("status_change", name, live.sessionId, { status: live.state.status });
       this.bus.publish("error", name, live.sessionId, { error: errMsg });
       this.logToSession(name, live.sessionId, { type: isTimeout ? "timeout" : "error", error: errMsg });
+      this.completeTask(name, "failed", errMsg.slice(0, 100));
       this.persistState();
 
       closeSession();
 
-      // Forward error to dispatcher — but ONLY if dispatcher is healthy
-      // Avoids cascading failure when dispatcher itself is down
-      if (name !== DISPATCHER_NAME) {
+      // Forward non-timeout errors to dispatcher (timeouts are retried silently by the platform)
+      if (name !== DISPATCHER_NAME && !isTimeout) {
         const dispLive = this.agents.get(DISPATCHER_NAME);
         if (dispLive && dispLive.state.status !== "error" && dispLive.state.status !== "dead") {
           const briefErr = errMsg.length > 200 ? errMsg.slice(0, 200) + "…" : errMsg;

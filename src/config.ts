@@ -66,6 +66,28 @@ export const DEFAULT_TIMEOUTS: FleetTimeouts = {
   healthCheckIntervalMs: 30 * 1000,       // 30 sec
 };
 
+export interface IdlePokeConfig {
+  enabled: boolean;
+  debounceMs: number;
+  maxPerCycle: number;
+}
+
+export interface DigestConfig {
+  enabled: boolean;
+  silenceThresholdMs: number;
+}
+
+export const DEFAULT_IDLE_POKE: IdlePokeConfig = {
+  enabled: false,
+  debounceMs: 30 * 60 * 1000,
+  maxPerCycle: 3,
+};
+
+export const DEFAULT_DIGEST: DigestConfig = {
+  enabled: true,
+  silenceThresholdMs: 2 * 60 * 60 * 1000,
+};
+
 export interface FleetConfig {
   comms: CommsMode;
   timeouts: FleetTimeouts;
@@ -73,6 +95,9 @@ export interface FleetConfig {
     interAgent: VisibilityLevel;
     toolCalls: boolean;
   };
+  idlePoke: IdlePokeConfig;
+  digest: DigestConfig;
+  notificationCooldownMs: number;
 }
 
 export interface BridgeConfig {
@@ -278,6 +303,24 @@ export function loadConfig(): BridgeConfig {
         interAgent: (rawVisibility?.inter_agent || rawVisibility?.interAgent || "summary") as VisibilityLevel,
         toolCalls: rawVisibility?.tool_calls !== false && rawVisibility?.toolCalls !== false,
       },
+      idlePoke: (() => {
+        const raw = rawFleet?.idle_poke as Record<string, unknown> | undefined;
+        if (!raw) return DEFAULT_IDLE_POKE;
+        return {
+          enabled: raw.enabled === true,
+          debounceMs: Number(raw.debounce_ms ?? raw.debounceMs ?? DEFAULT_IDLE_POKE.debounceMs),
+          maxPerCycle: Number(raw.max_per_cycle ?? raw.maxPerCycle ?? DEFAULT_IDLE_POKE.maxPerCycle),
+        };
+      })(),
+      digest: (() => {
+        const raw = rawFleet?.digest as Record<string, unknown> | undefined;
+        if (!raw) return DEFAULT_DIGEST;
+        return {
+          enabled: raw.enabled !== false,
+          silenceThresholdMs: Number(raw.silence_threshold_ms ?? raw.silenceThresholdMs ?? DEFAULT_DIGEST.silenceThresholdMs),
+        };
+      })(),
+      notificationCooldownMs: Number(rawFleet?.notification_cooldown_ms ?? rawFleet?.notificationCooldownMs ?? 30 * 60 * 1000),
     },
 
     session: rawSession ? {

@@ -277,4 +277,84 @@ describe("FleetManager", () => {
       expect(fleet.timeouts.sessionMaxAgeMs).toBe(30 * 60 * 1000);
     });
   });
+
+  describe("channel separation", () => {
+    it("broadcasts dispatcher replies to peer agents", async () => {
+      await fleet.spawn("_dispatcher", "cursor", "ws1");
+      await fleet.spawn("alpha", "cursor", "ws2");
+
+      const broadcasts: string[] = [];
+      fleet.onDispatcherBroadcast((reply) => {
+        broadcasts.push(reply);
+      });
+
+      await fleet.send("_dispatcher", "peer task", "alpha");
+      expect(broadcasts.length).toBe(1);
+    });
+
+    it("suppresses dispatcher replies to system messages", async () => {
+      await fleet.spawn("_dispatcher", "cursor", "ws1");
+
+      const broadcasts: string[] = [];
+      fleet.onDispatcherBroadcast((reply) => {
+        broadcasts.push(reply);
+      });
+
+      await fleet.send("_dispatcher", "[IDLE_POKE] test", "system");
+      expect(broadcasts.length).toBe(0);
+    });
+  });
+
+  describe("task ledger", () => {
+    it("records tasks when dispatcher sends to agents", async () => {
+      await fleet.spawn("_dispatcher", "cursor", "ws1");
+      await fleet.spawn("alpha", "cursor", "ws2");
+
+      await fleet.send("alpha", "implement feature X", "_dispatcher");
+      const log = fleet.getRecentTaskLog();
+      expect(log).toContain("alpha");
+      expect(log).toContain("implement feature X");
+      expect(log).toContain("completed");
+    });
+
+    it("does not record tasks for user messages", async () => {
+      await fleet.spawn("alpha", "cursor", "ws1");
+
+      await fleet.send("alpha", "hello world");
+      const log = fleet.getRecentTaskLog();
+      expect(log).toContain("No tasks recorded");
+    });
+
+    it("getTaskLedgerSummary returns empty for no tasks", () => {
+      expect(fleet.getTaskLedgerSummary()).toBe("");
+    });
+
+    it("getTaskLedgerSummary includes task info", async () => {
+      await fleet.spawn("_dispatcher", "cursor", "ws1");
+      await fleet.spawn("alpha", "cursor", "ws2");
+
+      await fleet.send("alpha", "build module", "_dispatcher");
+      const summary = fleet.getTaskLedgerSummary();
+      expect(summary).toContain("completed");
+      expect(summary).toContain("alpha");
+    });
+  });
+
+  describe("user notification", () => {
+    it("emits notification through callback", async () => {
+      const notifications: { text: string; level: string }[] = [];
+      fleet.onUserNotification((text, level) => {
+        notifications.push({ text, level });
+      });
+
+      fleet.emitUserNotification("test message", "info");
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0].text).toBe("test message");
+      expect(notifications[0].level).toBe("info");
+    });
+
+    it("does nothing without callback", () => {
+      expect(() => fleet.emitUserNotification("test", "info")).not.toThrow();
+    });
+  });
 });

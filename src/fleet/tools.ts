@@ -130,6 +130,25 @@ const TOOLS: Record<string, ToolDef> = {
       return `Goal set: ${goal.slice(0, 200)}`;
     },
   },
+
+  fleet_notify_user: {
+    permission: "dispatcher",
+    async execute(args, _agentName, fleet) {
+      const text = args.text as string;
+      const level = (args.level as string) || "info";
+      if (!text) return "Error: fleet_notify_user requires 'text'";
+      fleet.emitUserNotification(text, level);
+      return `Notification sent to user (${level})`;
+    },
+  },
+
+  fleet_task_log: {
+    permission: "dispatcher",
+    async execute(args, _agentName, fleet) {
+      const limit = (args.limit as number) || 20;
+      return fleet.getRecentTaskLog(limit);
+    },
+  },
 };
 
 export function createPostReplyHook(
@@ -196,6 +215,11 @@ You can execute fleet operations by including markers in your reply:
 - List workspaces: [FLEET:fleet_workspace_list:{}]
 - Set agent title: [FLEET:fleet_set_title:{"name":"agentname","title":"QA master"}]
 - Set fleet goal: [FLEET:fleet_set_goal:{"goal":"Build and test the auth module"}]
+- Notify user on Telegram: [FLEET:fleet_notify_user:{"text":"message","level":"info"}]
+  Use this to escalate something to the user. Your replies to system messages are silent by default.
+  Levels: "critical" (always delivered), "info" (throttled, for progress updates)
+- View task log: [FLEET:fleet_task_log:{"limit":20}]
+  See recent task dispatches and their outcomes (completed/failed/pending).
 
 You can include multiple markers in one reply. Results are logged to your session.
 Include the marker anywhere in your reply text — it will be stripped before showing to the user.
