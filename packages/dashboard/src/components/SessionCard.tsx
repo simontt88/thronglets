@@ -11,10 +11,11 @@ import type { Placement } from "../lib/pack";
 
 interface Props {
   agent: AgentState;
-  placement: Placement;
+  placement?: Placement;
+  mobile?: boolean;
 }
 
-export function SessionCard({ agent, placement }: Props) {
+export function SessionCard({ agent, placement, mobile }: Props) {
   const {
     selectedAgent, selectAgent, viewingSession, sessionLists, sessionEvents,
     setViewingSession, clearViewingSession, fontSizes, setFontSize, setActiveAgent,
@@ -72,13 +73,11 @@ export function SessionCard({ agent, placement }: Props) {
         (isWorking ? " working" : "") +
         (isSelected ? " selected" : "") +
         (isArchived ? " archived" : "") +
-        (isDead ? " dead" : "")
+        (isDead ? " dead" : "") +
+        (mobile ? " mobile-card" : "")
       }
       style={{
-        left: placement.x,
-        top: placement.y,
-        width: placement.w,
-        height: placement.h,
+        ...(placement ? { left: placement.x, top: placement.y, width: placement.w, height: placement.h } : {}),
         "--accent": accent,
         "--status-color": meta.color,
         "--card-font-size": `${fontSize}px`,
@@ -182,7 +181,7 @@ export function SessionCard({ agent, placement }: Props) {
         )}
       </div>
 
-      <div className="resize-handle br"></div>
+      {!mobile && <div className="resize-handle br"></div>}
 
       {/* Session picker dropdown */}
       {showSessionPicker && (

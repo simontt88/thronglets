@@ -91,6 +91,7 @@ interface FleetStore {
   setViewingSession: (agent: string, sessionId: string) => void;
   clearViewingSession: (agent: string) => void;
   setActiveAgent: (name: string) => void;
+  selectAndActivate: (name: string) => void;
   setCommandBarOpen: (v: boolean) => void;
   setSpawnDialogOpen: (v: boolean) => void;
   pushChillNotification: (agentName: string, text: string) => void;
@@ -167,7 +168,12 @@ export const useFleetStore = create<FleetStore>((set, get) => ({
     delete v[agent];
     return { viewingSession: v };
   }),
-  setActiveAgent: (name) => set({ activeAgent: name }),
+  setActiveAgent: (name) => {
+    const update: Partial<FleetStore> = { activeAgent: name };
+    if (name && name !== "@all" && name !== "dispatch") update.selectedAgent = name;
+    set(update);
+  },
+  selectAndActivate: (name) => set({ activeAgent: name, selectedAgent: name }),
   setCommandBarOpen: (v) => set({ commandBarOpen: v }),
   setSpawnDialogOpen: (v) => set({ spawnDialogOpen: v }),
   pushChillNotification: (agentName, text) => {
@@ -236,9 +242,15 @@ export function connectWS() {
           fetchFleet();
           break;
         case "agent_killed":
-          useFleetStore.setState((s) => ({
-            agents: s.agents.filter((a) => a.name !== event.agentName),
-          }));
+          useFleetStore.setState((s) => {
+            const remaining = s.agents.filter((a) => a.name !== event.agentName);
+            const update: Partial<FleetStore> = { agents: remaining };
+            if (s.activeAgent === event.agentName && remaining.length > 0) {
+              update.activeAgent = remaining[0].name;
+              update.selectedAgent = remaining[0].name;
+            }
+            return update;
+          });
           break;
         case "status_change":
           useFleetStore.setState((s) => ({

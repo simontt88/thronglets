@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { FleetManager, FleetEventBus, _setTestDir } from "../src/fleet/index.js";
-import type { FleetEvent } from "../src/fleet/index.js";
+import type { FleetEvent, FleetActivityEvent } from "../src/fleet/index.js";
 import type { Runtime, AgentSession, RuntimeSessionOptions } from "../src/runtimes/interface.js";
 import type { RuntimeType } from "../src/config.js";
 import { mkdtempSync, rmSync } from "fs";
@@ -367,6 +367,76 @@ describe("FleetManager", () => {
 
     it("does nothing without callback", () => {
       expect(() => fleet.emitUserNotification("test", "info")).not.toThrow();
+    });
+  });
+
+  describe("fleet activity events", () => {
+    it("emits agent_waking when agent starts processing", async () => {
+      await fleet.spawn("alpha", "cursor", "ws1");
+      const activities: FleetActivityEvent[] = [];
+      fleet.onFleetActivity((e) => activities.push(e));
+
+      await fleet.send("alpha", "do something");
+      const waking = activities.find((a) => a.type === "agent_waking");
+      expect(waking).toBeDefined();
+      expect(waking!.agent).toBe("alpha");
+      expect(waking!.detail.from).toBe("user");
+    });
+
+    it("emits agent_completed with elapsed time on success", async () => {
+      await fleet.spawn("alpha", "cursor", "ws1");
+      const activities: FleetActivityEvent[] = [];
+      fleet.onFleetActivity((e) => activities.push(e));
+
+      await fleet.send("alpha", "build module");
+      const completed = activities.find((a) => a.type === "agent_completed");
+      expect(completed).toBeDefined();
+      expect(completed!.agent).toBe("alpha");
+      expect(completed!.detail.elapsedMs).toBeGreaterThanOrEqual(0);
+      expect(completed!.detail.replyPreview).toBeDefined();
+    });
+
+    it("does not emit activity events for dispatcher", async () => {
+      await fleet.spawn("_dispatcher", "cursor", "ws1");
+      const activities: FleetActivityEvent[] = [];
+      fleet.onFleetActivity((e) => activities.push(e));
+
+      await fleet.send("_dispatcher", "do something");
+      expect(activities).toHaveLength(0);
+    });
+
+    it("emits send_success via fleet_send tool callback pattern", () => {
+      const activities: FleetActivityEvent[] = [];
+      fleet.onFleetActivity((e) => activities.push(e));
+
+      fleet.emitFleetActivity("send_success", "alpha", { from: "_dispatcher", task: "build X" });
+      expect(activities).toHaveLength(1);
+      expect(activities[0].type).toBe("send_success");
+      expect(activities[0].agent).toBe("alpha");
+      expect(activities[0].detail.from).toBe("_dispatcher");
+    });
+
+    it("emits send_failed via fleet_send tool callback pattern", () => {
+      const activities: FleetActivityEvent[] = [];
+      fleet.onFleetActivity((e) => activities.push(e));
+
+      fleet.emitFleetActivity("send_failed", "alpha", { from: "_dispatcher", error: "timeout" });
+      expect(activities).toHaveLength(1);
+      expect(activities[0].type).toBe("send_failed");
+      expect(activities[0].detail.error).toBe("timeout");
+    });
+
+    it("does nothing without callback registered", () => {
+      expect(() => fleet.emitFleetActivity("agent_waking", "alpha", {})).not.toThrow();
+    });
+
+    it("tracks workingStartedAt for elapsed time", async () => {
+      await fleet.spawn("alpha", "cursor", "ws1");
+
+      expect(fleet.getWorkingElapsed("alpha")).toBeNull();
+      await fleet.send("alpha", "task");
+      // After completion, workingStartedAt is cleared
+      expect(fleet.getWorkingElapsed("alpha")).toBeNull();
     });
   });
 });

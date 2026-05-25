@@ -53,6 +53,29 @@
   </tr>
 </table>
 
+### Mobile Dashboard
+
+<table>
+  <tr>
+    <td width="25%">
+      <img src="docs/assets/mobile-dispatcher.jpg" alt="Mobile — dispatcher card with task table" width="100%" />
+      <p align="center"><sub>Dispatcher view</sub></p>
+    </td>
+    <td width="25%">
+      <img src="docs/assets/mobile-habitat.jpg" alt="Mobile — habitat status overlay" width="100%" />
+      <p align="center"><sub>Habitat status</sub></p>
+    </td>
+    <td width="25%">
+      <img src="docs/assets/mobile-session.jpg" alt="Mobile — agent session with conversation" width="100%" />
+      <p align="center"><sub>Agent session</sub></p>
+    </td>
+    <td width="25%">
+      <img src="docs/assets/mobile-chill.jpg" alt="Mobile — chill mode with pixel creatures" width="100%" />
+      <p align="center"><sub>Chill mode</sub></p>
+    </td>
+  </tr>
+</table>
+
 ## Why "Thronglets"?
 
 The name comes from *Black Mirror* — those little digital creatures trapped in a simulation. We thought it was funny for coding agents. It stuck.

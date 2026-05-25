@@ -93,6 +93,7 @@ export interface FleetConfig {
   timeouts: FleetTimeouts;
   visibility: {
     interAgent: VisibilityLevel;
+    lifecycle: boolean;
     toolCalls: boolean;
   };
   idlePoke: IdlePokeConfig;
@@ -301,6 +302,7 @@ export function loadConfig(): BridgeConfig {
       },
       visibility: {
         interAgent: (rawVisibility?.inter_agent || rawVisibility?.interAgent || "summary") as VisibilityLevel,
+        lifecycle: rawVisibility?.lifecycle !== false,
         toolCalls: rawVisibility?.tool_calls !== false && rawVisibility?.toolCalls !== false,
       },
       idlePoke: (() => {

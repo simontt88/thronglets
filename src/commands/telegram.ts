@@ -48,7 +48,9 @@ export function setupCommandRouter(deps: CommandRouterDeps): { getNotifyChatId: 
   const dispatcherConfig = getDispatcherConfig(config);
   const cwdAlias = workspaces.find((w) => w.path === config.workspace);
 
-  let notifyChatId: string | null = null;
+  // Seed from config so lifecycle notifications work before the first user message
+  const transportConfig = config.telegram || config.lark;
+  let notifyChatId: string | null = transportConfig?.allowedChats?.[0] ?? null;
 
   transport.onMessage(async (msg) => {
     const { chatId, text } = msg;

@@ -3,7 +3,7 @@ import type { MessageSender, WorkspaceEntry } from "./types.js";
 import type { CommsMode } from "../config.js";
 import { DISPATCHER_NAME } from "../utils/constants.js";
 
-const FLEET_MARKER_REGEX = /\[FLEET:(\w+):(.*?)\]/g;
+const FLEET_MARKER_REGEX = /\[FLEET:(\w+):(\{[\s\S]*?\})\]/g;
 
 type ToolPermission = "dispatcher" | "all";
 
@@ -40,8 +40,11 @@ const TOOLS: Record<string, ToolDef> = {
 
       fleet.send(target, fullText, agentName).then((reply) => {
         console.log(`[fleet-tools] ${agentName} → ${target}: delivered, got ${reply.length} char reply`);
+        fleet.emitFleetActivity("send_success", target, { from: agentName, task: text.slice(0, 80) });
       }).catch((err) => {
-        console.warn(`[fleet-tools] ${agentName} → ${target}: send failed: ${(err as Error).message?.slice(0, 60)}`);
+        const errMsg = (err as Error).message?.slice(0, 60) || "unknown";
+        console.warn(`[fleet-tools] ${agentName} → ${target}: send failed: ${errMsg}`);
+        fleet.emitFleetActivity("send_failed", target, { from: agentName, error: errMsg });
       });
 
       return `Message queued for @${target}`;
@@ -52,9 +55,23 @@ const TOOLS: Record<string, ToolDef> = {
     permission: "all",
     async execute(_args, _agentName, fleet, workspaces) {
       const status = fleet.getStatus();
-      const agentLines = status.agents.map((a) =>
-        `  @${a.name}${a.title ? ` (${a.title})` : ""}: ${a.runtime} · ${a.workspace} · ${a.status}${a.sessionName ? ` 「${a.sessionName}」` : ""}`
-      ).join("\n");
+      const formatAge = (iso: string | undefined): string => {
+        if (!iso) return "";
+        const ms = Date.now() - new Date(iso).getTime();
+        if (ms < 60_000) return "just now";
+        if (ms < 3600_000) return `${Math.round(ms / 60_000)}m ago`;
+        return `${Math.round(ms / 3600_000)}h ago`;
+      };
+      const agentLines = status.agents.map((a) => {
+        const parts = [`  @${a.name}${a.title ? ` (${a.title})` : ""}: ${a.runtime} · ${a.workspace} · ${a.status}`];
+        if (a.sessionName) parts.push(`「${a.sessionName}」`);
+        if (a.lastUserMessage) {
+          const age = formatAge(a.lastUserMessageAt);
+          const preview = a.lastUserMessage.length > 60 ? a.lastUserMessage.slice(0, 60) + "…" : a.lastUserMessage;
+          parts.push(`📩 user direct${age ? ` (${age})` : ""}: "${preview}"`);
+        }
+        return parts.join(" ");
+      }).join("\n");
       const wsLines = workspaces.map((w) => `  ${w.alias}: ${w.path}`).join("\n");
       return `Fleet: ${status.total} agents (${status.working} working, ${status.waiting} waiting, ${status.sleeping} sleeping, ${status.dead} dead)\n${agentLines}\n\nWorkspaces:\n${wsLines}`;
     },
@@ -186,6 +203,7 @@ export function createPostReplyHook(
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
         results.push(`[FLEET-RESULT:${action}:error — ${errMsg.slice(0, 80)}]`);
+        console.warn(`[fleet-tools] ${agentName} ${action} FAILED: ${errMsg.slice(0, 120)} | args: ${argsJson.slice(0, 100)}`);
       }
     }
 

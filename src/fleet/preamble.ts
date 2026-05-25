@@ -54,6 +54,14 @@ export function buildDispatcherPreamble(
 ): string {
   const displayName = dispatcherDisplayName || "Dispatcher";
 
+  const formatAge = (iso: string | undefined): string => {
+    if (!iso) return "";
+    const ms = Date.now() - new Date(iso).getTime();
+    if (ms < 60_000) return "just now";
+    if (ms < 3600_000) return `${Math.round(ms / 60_000)}m ago`;
+    return `${Math.round(ms / 3600_000)}h ago`;
+  };
+
   const agentSummary = status.agents
     .filter((a) => a.name !== DISPATCHER_NAME)
     .map((a) => {
@@ -62,8 +70,9 @@ export function buildDispatcherPreamble(
       if (a.sessionName) parts.push(`「${a.sessionName}」`);
       if (a.inferred) parts.push(`(${a.inferred})`);
       if (a.lastUserMessage) {
+        const age = formatAge(a.lastUserMessageAt);
         const preview = a.lastUserMessage.length > 80 ? a.lastUserMessage.slice(0, 80) + "…" : a.lastUserMessage;
-        parts.push(`last task: "${preview}"`);
+        parts.push(`📩 user direct${age ? ` (${age})` : ""}: "${preview}"`);
       }
       return `  - ${parts.join(" ")}`;
     })
@@ -102,6 +111,11 @@ export function buildDispatcherPreamble(
     `- When spawning: NEVER specify a name. Names are auto-assigned by the system.`,
     `- When a throng reports "DONE: ...", acknowledge it and chain the next step if the goal requires it.`,
     `- If a throng reports file paths, forward those paths to the next throng that needs them.`,
+    ``,
+    `## Direct user↔throng communication`,
+    `The user can @mention and command any throng directly, bypassing you. This is normal.`,
+    `When a throng does something you didn't assign, check its "📩 user direct" in the fleet list — the user likely gave it instructions directly.`,
+    `Don't question or override work the user initiated directly. Just stay aware of it for coordination.`,
     ``,
     getToolInstructions(true),
     ``,

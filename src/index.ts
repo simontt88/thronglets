@@ -156,19 +156,53 @@ async function main() {
     }
   });
 
-  // Task completion notifications — only in "full" visibility mode
-  bus.onEvent((event) => {
-    if (event.type !== "status_change") return;
-    if (visibility.interAgent !== "full") return;
+  // Fleet activity notifications — platform-level status feed
+  fleet.onFleetActivity((event) => {
+    console.log(`[lifecycle] ${event.type} agent=${event.agent}`);
+    if (!visibility.lifecycle) return;
     const chatId = getNotifyChatId();
     if (!chatId) return;
-    const payload = event.payload as { status?: string } | undefined;
-    if (!payload) return;
 
-    if (payload.status === "waiting" && event.agentName !== DISPATCHER_AGENT_NAME) {
-      const agent = fleet.getAgent(event.agentName);
-      const lastTask = agent?.lastUserMessage?.slice(0, 80) || "task";
-      transport.sendReply(chatId, `✅ ${event.agentName} finished: ${lastTask}`).catch(() => {});
+    const formatElapsed = (ms: number | null | undefined): string => {
+      if (!ms) return "";
+      if (ms < 60_000) return `${Math.round(ms / 1000)}s`;
+      return `${Math.round(ms / 60_000)}m${Math.round((ms % 60_000) / 1000)}s`;
+    };
+
+    switch (event.type) {
+      case "agent_waking": {
+        const from = event.detail.from as string;
+        const task = event.detail.task as string;
+        transport.sendReply(chatId, `🔄 ${event.agent}: sleeping → working\n   ← ${from}: "${task}"`).catch(() => {});
+        break;
+      }
+      case "agent_completed": {
+        const elapsed = formatElapsed(event.detail.elapsedMs as number | null);
+        const preview = event.detail.replyPreview as string || "";
+        const elapsedStr = elapsed ? ` (${elapsed})` : "";
+        const previewStr = preview ? `\n   "${preview.slice(0, 100)}"` : "";
+        transport.sendReply(chatId, `✅ ${event.agent}: done${elapsedStr}${previewStr}`).catch(() => {});
+        break;
+      }
+      case "agent_died": {
+        const error = (event.detail.error as string) || "unknown error";
+        transport.sendReply(chatId, `❌ ${event.agent}: error — ${error}`).catch(() => {});
+        break;
+      }
+      case "agent_timeout": {
+        const attempts = event.detail.attempts as number || 0;
+        transport.sendReply(chatId, `⏱ ${event.agent}: timed out${attempts > 1 ? ` (${attempts} attempts)` : ""}`).catch(() => {});
+        break;
+      }
+      case "send_failed": {
+        const from = event.detail.from as string;
+        const error = (event.detail.error as string) || "unknown";
+        transport.sendReply(chatId, `⚠️ Failed to reach ${event.agent} (from ${from}): ${error}`).catch(() => {});
+        break;
+      }
+      // send_success is implicit — the agent_waking event already tells the user
+      default:
+        break;
     }
   });
 

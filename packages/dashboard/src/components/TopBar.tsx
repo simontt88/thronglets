@@ -10,6 +10,7 @@ export function TopBar() {
   const [deleteError, setDeleteError] = useState("");
   const [editingWs, setEditingWs] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const [mobileWsOpen, setMobileWsOpen] = useState(false);
   const editRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -25,6 +26,8 @@ export function TopBar() {
       count: agents.filter((a) => a.workspace === ws.alias).length,
     })),
   ];
+
+  const currentWsInfo = wsGroups.find((w) => w.alias === currentWorkspace) || wsGroups[0];
 
   const handleDeleteWs = async (alias: string) => {
     const result = await deleteWorkspace(alias);
@@ -46,6 +49,7 @@ export function TopBar() {
         <div className="brand-name">Thronglets</div>
       </div>
 
+      {/* Desktop: horizontal workspace tabs */}
       <nav className="workspaces">
         {wsGroups.map((ws) => (
           <button
@@ -100,6 +104,32 @@ export function TopBar() {
           </button>
         ))}
       </nav>
+
+      {/* Mobile: compact workspace dropdown */}
+      <div className="ws-mobile-wrap">
+        <button className="ws-mobile-btn" onClick={() => setMobileWsOpen(!mobileWsOpen)}>
+          <span className="ws-mobile-name">{currentWsInfo.name}</span>
+          <span className="ws-mobile-count">{currentWsInfo.count}</span>
+          <span className="ws-mobile-caret">▾</span>
+        </button>
+        {mobileWsOpen && (
+          <>
+            <div className="ws-mobile-backdrop" onClick={() => setMobileWsOpen(false)} />
+            <div className="ws-mobile-dropdown">
+              {wsGroups.map((ws) => (
+                <button
+                  key={ws.alias}
+                  className={"ws-mobile-item" + (currentWorkspace === ws.alias ? " active" : "")}
+                  onClick={() => { setWorkspace(ws.alias); setMobileWsOpen(false); }}
+                >
+                  <span className="ws-mobile-item-name">{ws.name}</span>
+                  <span className="ws-mobile-item-count">{ws.count}</span>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
 
       <div className="topbar-right">
         <button

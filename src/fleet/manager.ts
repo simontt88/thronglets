@@ -9,7 +9,7 @@ import { generateUniqueName } from "./naming.js";
 import { buildAgentPreamble, buildDispatcherPreamble } from "./preamble.js";
 import { DISPATCHER_NAME } from "../utils/constants.js";
 import { HealthMonitor } from "./health-monitor.js";
-import type { AgentState, AgentStatus, FleetEvent, FleetEventType, FleetState, QueuedMessage, MessageSender, WorkspaceEntry } from "./types.js";
+import type { AgentState, AgentStatus, FleetEvent, FleetEventType, FleetState, QueuedMessage, MessageSender, WorkspaceEntry, FleetActivityEvent, FleetActivityType } from "./types.js";
 export type { WorkspaceEntry } from "./types.js";
 
 export class FleetEventBus extends EventEmitter {
@@ -67,6 +67,7 @@ export type ReplyRoutingCallback = (fromAgent: string, toAgent: string, reply: s
 export type PeerMessageCallback = (fromAgent: string, toAgent: string, direction: "sent" | "replied") => void;
 export type DispatcherBroadcastCallback = (reply: string, triggerAgent: string) => void;
 export type UserNotificationCallback = (text: string, level: string) => void;
+export type FleetActivityCallback = (event: FleetActivityEvent) => void;
 
 export interface TaskRecord {
   assignedAt: string;
@@ -87,7 +88,10 @@ export class FleetManager {
   private peerMessageCallback: PeerMessageCallback | null = null;
   private dispatcherBroadcastCallback: DispatcherBroadcastCallback | null = null;
   private userNotificationCallback: UserNotificationCallback | null = null;
+  private fleetActivityCallback: FleetActivityCallback | null = null;
   private taskLedger: TaskRecord[] = [];
+  private workingStartedAt = new Map<string, number>();
+  private repliedToDispatcher = new Set<string>();
 
   constructor(bus: FleetEventBus, config: FleetManagerConfig) {
     this.bus = bus;
@@ -127,6 +131,20 @@ export class FleetManager {
 
   emitUserNotification(text: string, level: string): void {
     this.userNotificationCallback?.(text, level);
+  }
+
+  onFleetActivity(callback: FleetActivityCallback): void {
+    this.fleetActivityCallback = callback;
+  }
+
+  emitFleetActivity(type: FleetActivityType, agent: string, detail: Record<string, unknown> = {}): void {
+    this.fleetActivityCallback?.({ type, agent, detail });
+  }
+
+  getWorkingElapsed(name: string): number | null {
+    const started = this.workingStartedAt.get(name);
+    if (!started) return null;
+    return Date.now() - started;
   }
 
   recordTask(agent: string, task: string): void {
@@ -419,6 +437,11 @@ export class FleetManager {
       this.recordTask(name, text);
     }
 
+    // Track when a throng explicitly sends a reply back to the dispatcher
+    if (name === DISPATCHER_NAME && sender !== "user" && sender !== "system") {
+      this.repliedToDispatcher.add(sender as string);
+    }
+
     // Notify about peer-to-peer messages (not user→agent)
     if (sender !== "user" && this.peerMessageCallback) {
       this.peerMessageCallback(sender as string, name, "sent");
@@ -464,12 +487,20 @@ export class FleetManager {
     live.state.status = "working";
     live.state.inferred = `processing message from ${sender}`;
     live.state.lastActivity = new Date().toISOString();
-    if (sender === "user") live.state.lastUserMessage = text;
+    this.workingStartedAt.set(name, Date.now());
+    this.repliedToDispatcher.delete(name);
+    if (sender === "user") {
+      live.state.lastUserMessage = text;
+      live.state.lastUserMessageAt = new Date().toISOString();
+    }
 
     // Tag message with sender for the agent to see
     const taggedText = sender === "user" ? text : `[from:${sender}] ${text}`;
 
     this.bus.publish("status_change", name, live.sessionId, { status: "working" });
+    if (name !== DISPATCHER_NAME) {
+      this.emitFleetActivity("agent_waking", name, { from: sender, task: text.slice(0, 80) });
+    }
     this.bus.publish("user_message", name, live.sessionId, { text: taggedText, sender });
     this.logToSession(name, live.sessionId, { type: "user_message", text: taggedText, sender });
 
@@ -535,6 +566,10 @@ export class FleetManager {
             live.state.inferred = `send timed out ${MAX_ATTEMPTS}x — session closed`;
             this.bus.publish("status_change", name, live.sessionId, { status: "dead" });
             this.completeTask(name, "failed", `timeout ${MAX_ATTEMPTS}x`);
+            if (name !== DISPATCHER_NAME) {
+              this.emitFleetActivity("agent_timeout", name, { attempts: MAX_ATTEMPTS });
+              this.workingStartedAt.delete(name);
+            }
             this.persistState();
             this.finishProcessing(name, live);
             return `⚠️ Agent "${name}" timed out ${MAX_ATTEMPTS}x. Session closed. Send another message to auto-recover.`;
@@ -567,6 +602,28 @@ export class FleetManager {
       if (sender === DISPATCHER_NAME && name !== DISPATCHER_NAME) {
         this.completeTask(name, "completed", reply!);
       }
+
+      if (name !== DISPATCHER_NAME) {
+        const elapsed = this.getWorkingElapsed(name);
+        this.emitFleetActivity("agent_completed", name, {
+          elapsedMs: elapsed,
+          replyPreview: reply!.slice(0, 120),
+        });
+        this.workingStartedAt.delete(name);
+
+        // Auto-forward completion to dispatcher if the throng didn't explicitly report back.
+        // This ensures the dispatcher always knows when assigned tasks finish.
+        if (sender === DISPATCHER_NAME && !this.repliedToDispatcher.has(name)) {
+          const preview = reply!.slice(0, 200);
+          const summary = `[system] ${name} completed your task. Reply: ${preview}${reply!.length > 200 ? "…" : ""}`;
+          console.log(`[fleet] auto-forwarding ${name}'s completion to dispatcher (no explicit fleet_send back)`);
+          this.send(DISPATCHER_NAME, summary, name as MessageSender).catch((err) => {
+            console.warn(`[fleet] auto-forward to dispatcher failed: ${(err as Error).message?.slice(0, 60)}`);
+          });
+        }
+        this.repliedToDispatcher.delete(name);
+      }
+
       this.persistState();
 
       // Reply routing: if message was from another agent, route reply back
@@ -599,6 +656,13 @@ export class FleetManager {
       this.bus.publish("error", name, live.sessionId, { error: errMsg });
       this.logToSession(name, live.sessionId, { type: isTimeout ? "timeout" : "error", error: errMsg });
       this.completeTask(name, "failed", errMsg.slice(0, 100));
+      if (name !== DISPATCHER_NAME) {
+        this.emitFleetActivity(isTimeout ? "agent_timeout" : "agent_died", name, {
+          error: errMsg.slice(0, 100),
+        });
+        this.workingStartedAt.delete(name);
+        this.repliedToDispatcher.delete(name);
+      }
       this.persistState();
 
       closeSession();

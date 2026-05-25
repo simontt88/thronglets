@@ -39,6 +39,7 @@ export interface AgentState {
   lastActivity: string;
   messageCount: number;
   lastUserMessage?: string;
+  lastUserMessageAt?: string;
   lastAgentMessage?: string;
   inferred?: string;
   sessionName?: string;
@@ -62,4 +63,18 @@ export interface QueuedMessage {
 export interface WorkspaceEntry {
   alias: string;
   path: string;
+}
+
+export type FleetActivityType =
+  | "send_success"
+  | "send_failed"
+  | "agent_waking"
+  | "agent_completed"
+  | "agent_died"
+  | "agent_timeout";
+
+export interface FleetActivityEvent {
+  type: FleetActivityType;
+  agent: string;
+  detail: Record<string, unknown>;
 }
