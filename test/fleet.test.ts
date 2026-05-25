@@ -1,8 +1,11 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { FleetManager, FleetEventBus } from "../src/fleet/index.js";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { FleetManager, FleetEventBus, _setTestDir } from "../src/fleet/index.js";
 import type { FleetEvent } from "../src/fleet/index.js";
 import type { Runtime, AgentSession, RuntimeSessionOptions } from "../src/runtimes/interface.js";
 import type { RuntimeType } from "../src/config.js";
+import { mkdtempSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 
 class MockSession implements AgentSession {
   responses: string[];
@@ -60,11 +63,20 @@ function makeFleet() {
 describe("FleetManager", () => {
   let fleet: FleetManager;
   let events: FleetEvent[];
+  let testDir: string;
 
   beforeEach(() => {
+    testDir = mkdtempSync(join(tmpdir(), "thronglets-test-"));
+    _setTestDir(testDir);
     const ctx = makeFleet();
     fleet = ctx.fleet;
     events = ctx.events;
+  });
+
+  afterEach(() => {
+    fleet.stopHealthCheck();
+    _setTestDir(null);
+    try { rmSync(testDir, { recursive: true, force: true }); } catch {}
   });
 
   describe("spawn", () => {

@@ -4,7 +4,7 @@ import { EventEmitter } from "events";
 import type { AgentDef, BridgeConfig, RuntimeType, CommsMode, FleetTimeouts } from "../config.js";
 import { DEFAULT_TIMEOUTS } from "../config.js";
 import type { Runtime, AgentSession } from "../runtimes/interface.js";
-import { loadFleetState, saveFleetState, getSessionsDir, readRecentHistory, addWorkspace as addWorkspaceToState, removeWorkspace as removeWorkspaceFromState, renameWorkspace as renameWorkspaceInState, loadWorkspaces } from "./state.js";
+import { loadFleetState, saveFleetState, getSessionsDir, readRecentHistory, addWorkspace as addWorkspaceToState, removeWorkspace as removeWorkspaceFromState, renameWorkspace as renameWorkspaceInState, loadWorkspaces, recoverFromSessions } from "./state.js";
 import { generateUniqueName } from "./naming.js";
 import { buildAgentPreamble, buildDispatcherPreamble } from "./preamble.js";
 import { DISPATCHER_NAME } from "../utils/constants.js";
@@ -844,8 +844,19 @@ export class FleetManager {
   }
 
   async restore(): Promise<void> {
-    const saved = loadFleetState();
-    if (!Object.keys(saved.agents).length) return;
+    let saved = loadFleetState();
+
+    // If state is empty, attempt recovery from session directories
+    if (!Object.keys(saved.agents).length) {
+      console.log(`[fleet] state is empty — attempting recovery from session directories...`);
+      saved = recoverFromSessions(this.config.workspaces);
+      if (Object.keys(saved.agents).length > 0) {
+        saveFleetState(saved);
+        console.log(`[fleet] recovered and saved ${Object.keys(saved.agents).length} agents`);
+      } else {
+        return;
+      }
+    }
 
     console.log(`[fleet] restoring ${Object.keys(saved.agents).length} agents from state...`);
     for (const [name, agentState] of Object.entries(saved.agents)) {
@@ -866,11 +877,17 @@ export class FleetManager {
       const agentDef = this.config.getAgentDef(agentState.runtime as RuntimeType);
       const runtimeInstance = this.config.createRuntime(agentDef);
 
+      // Use the config's model, not the saved one (which could be stale or from tests)
+      const resolvedModel = agentDef.model || agentState.model;
+      if (agentState.model !== resolvedModel) {
+        console.log(`[fleet] "${name}" model updated: ${agentState.model} → ${resolvedModel}`);
+      }
+
       // On restart: any non-stopped state becomes sleeping (session is gone)
       const rawStatus = agentState.status as string;
       const restoredStatus: AgentStatus = rawStatus === "stopped" ? "stopped" : "sleeping";
       this.agents.set(name, {
-        state: { ...agentState, status: restoredStatus },
+        state: { ...agentState, status: restoredStatus, model: resolvedModel },
         runtime: runtimeInstance,
         session: null,
         sessionId: agentState.currentSessionId,

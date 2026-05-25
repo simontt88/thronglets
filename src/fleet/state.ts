@@ -1,37 +1,184 @@
-import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, readdirSync } from "fs";
+import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, readdirSync, copyFileSync, statSync } from "fs";
 import { join } from "path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import type { FleetState, WorkspaceEntry } from "./types.js";
+import type { FleetState, AgentState, WorkspaceEntry } from "./types.js";
 import { GLOBAL_CONFIG_DIR } from "../config.js";
 
 const THRONGLETS_HOME = GLOBAL_CONFIG_DIR;
 const FLEET_DIR = join(THRONGLETS_HOME, "fleet");
 const STATE_FILE = join(FLEET_DIR, "fleet-state.json");
+const STATE_BACKUP = STATE_FILE + ".bak";
 const WORKSPACES_FILE = join(THRONGLETS_HOME, "workspaces.yaml");
+
+let _testDir: string | null = null;
+
+export function _setTestDir(dir: string | null): void {
+  _testDir = dir;
+}
+
+function getStateFile(): string {
+  return _testDir ? join(_testDir, "fleet-state.json") : STATE_FILE;
+}
+
+function getBackupFile(): string {
+  return _testDir ? join(_testDir, "fleet-state.json.bak") : STATE_BACKUP;
+}
+
+function resolveFleetDir(): string {
+  return _testDir ? _testDir : FLEET_DIR;
+}
 
 function ensureDir(dir: string): void {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 }
 
 export function loadFleetState(): FleetState {
-  ensureDir(FLEET_DIR);
-  if (!existsSync(STATE_FILE)) {
-    return { agents: {}, version: 1, lastUpdated: new Date().toISOString() };
+  const fleetDir = resolveFleetDir();
+  const stateFile = getStateFile();
+  const backupFile = getBackupFile();
+  ensureDir(fleetDir);
+
+  if (existsSync(stateFile)) {
+    try {
+      const raw = readFileSync(stateFile, "utf-8");
+      const state = JSON.parse(raw) as FleetState;
+      if (Object.keys(state.agents).length > 0) {
+        return state;
+      }
+    } catch {
+      console.warn(`[state] failed to parse ${stateFile}, trying backup...`);
+    }
   }
-  try {
-    const raw = readFileSync(STATE_FILE, "utf-8");
-    return JSON.parse(raw) as FleetState;
-  } catch {
-    return { agents: {}, version: 1, lastUpdated: new Date().toISOString() };
+
+  // State is empty or missing — try backup
+  if (existsSync(backupFile)) {
+    try {
+      const raw = readFileSync(backupFile, "utf-8");
+      const state = JSON.parse(raw) as FleetState;
+      if (Object.keys(state.agents).length > 0) {
+        console.log(`[state] recovered ${Object.keys(state.agents).length} agents from backup`);
+        return state;
+      }
+    } catch {
+      console.warn(`[state] backup also unreadable`);
+    }
   }
+
+  return { agents: {}, version: 1, lastUpdated: new Date().toISOString() };
 }
 
 export function saveFleetState(state: FleetState): void {
-  ensureDir(FLEET_DIR);
+  const fleetDir = resolveFleetDir();
+  const stateFile = getStateFile();
+  const backupFile = getBackupFile();
+  ensureDir(fleetDir);
   state.lastUpdated = new Date().toISOString();
-  const tmp = STATE_FILE + ".tmp";
+
+  // Backup current state before overwriting (only if it has real agents)
+  if (existsSync(stateFile)) {
+    try {
+      const existing = JSON.parse(readFileSync(stateFile, "utf-8")) as FleetState;
+      if (Object.keys(existing.agents).length > 0) {
+        copyFileSync(stateFile, backupFile);
+      }
+    } catch { /* ignore backup failures */ }
+  }
+
+  const tmp = stateFile + ".tmp";
   writeFileSync(tmp, JSON.stringify(state, null, 2));
-  renameSync(tmp, STATE_FILE);
+  renameSync(tmp, stateFile);
+}
+
+export function recoverFromSessions(workspaces: WorkspaceEntry[]): FleetState {
+  const sessionsDir = join(FLEET_DIR, "sessions");
+  if (!existsSync(sessionsDir)) {
+    return { agents: {}, version: 1, lastUpdated: new Date().toISOString() };
+  }
+
+  const agentDirs = readdirSync(sessionsDir).filter((d) => {
+    try { return statSync(join(sessionsDir, d)).isDirectory(); } catch { return false; }
+  });
+
+  // Skip test artifacts and already-recovered agents
+  const skipNames = new Set(["alpha", "beta", "gamma", "lala", "lila", "lilo", "stuart"]);
+  const agents: Record<string, AgentState> = {};
+  const wsMap = new Map(workspaces.map((w) => [w.path, w.alias]));
+
+  for (const name of agentDirs) {
+    if (skipNames.has(name.toLowerCase())) continue;
+
+    const dir = join(sessionsDir, name);
+    const files = readdirSync(dir).filter((f) => f.endsWith(".jsonl")).sort().reverse();
+    if (files.length === 0) continue;
+
+    // Read the most recent session to extract metadata
+    let lastActivity = "";
+    let sessionName = "";
+    let lastUserMessage = "";
+    let lastAgentMessage = "";
+    let workspace = "";
+    let workspacePath = "";
+
+    const latestFile = join(dir, files[0]);
+    try {
+      const content = readFileSync(latestFile, "utf-8").trim();
+      const lines = content.split("\n").filter(Boolean);
+      for (const line of lines) {
+        try {
+          const entry = JSON.parse(line);
+          if (entry.ts) lastActivity = entry.ts;
+          if (entry.type === "session_named") sessionName = entry.sessionName || "";
+          if (entry.type === "user_message") lastUserMessage = (entry.text || "").slice(0, 200);
+          if (entry.type === "agent_message") lastAgentMessage = (entry.text || "").slice(0, 200);
+        } catch { /* skip */ }
+      }
+    } catch { continue; }
+
+    if (!lastActivity) continue;
+
+    // Skip sessions older than 7 days
+    const age = Date.now() - new Date(lastActivity).getTime();
+    if (age > 7 * 24 * 60 * 60 * 1000) continue;
+
+    // Try to match workspace from session data
+    for (const [path, alias] of wsMap) {
+      if (lastUserMessage.includes(path) || lastAgentMessage.includes(path)) {
+        workspace = alias;
+        workspacePath = path;
+        break;
+      }
+    }
+
+    // For dispatcher, use "dispatch" workspace
+    if (name === "_dispatcher") {
+      workspace = "dispatch";
+      const wsEntry = workspaces.find((w) => w.alias === "dispatch");
+      workspacePath = wsEntry?.path || "";
+    }
+
+    agents[name] = {
+      name,
+      runtime: "cursor",
+      model: "",
+      workspace,
+      workspacePath,
+      status: "sleeping",
+      currentSessionId: files[0].replace(".jsonl", ""),
+      spawnedAt: lastActivity,
+      lastActivity,
+      messageCount: files.length,
+      sessionName: sessionName || undefined,
+      lastUserMessage: lastUserMessage || undefined,
+      lastAgentMessage: lastAgentMessage || undefined,
+    };
+  }
+
+  const recovered = Object.keys(agents).length;
+  if (recovered > 0) {
+    console.log(`[state] recovered ${recovered} agents from session directories`);
+  }
+
+  return { agents, version: 1, lastUpdated: new Date().toISOString() };
 }
 
 export function getSessionsDir(agentName: string): string {
@@ -41,8 +188,9 @@ export function getSessionsDir(agentName: string): string {
 }
 
 export function getFleetDir(): string {
-  ensureDir(FLEET_DIR);
-  return FLEET_DIR;
+  const dir = resolveFleetDir();
+  ensureDir(dir);
+  return dir;
 }
 
 export function loadWorkspaces(): WorkspaceEntry[] {
