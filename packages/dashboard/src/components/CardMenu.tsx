@@ -1,7 +1,7 @@
-import { useEffect, useRef } from "react";
-import { useFleetStore, serverBase } from "../stores/fleet";
+import { useEffect, useRef, useState } from "react";
+import { useFleetStore, serverBase, changeAgent } from "../stores/fleet";
 import type { AgentState } from "../stores/fleet";
-import { PALETTE } from "../lib/constants";
+import { PALETTE, RUNTIMES, RUNTIME_MODELS } from "../lib/constants";
 import { Icon } from "./Icons";
 
 interface Props {
@@ -15,6 +15,8 @@ interface Props {
 export function CardMenu({ agent, x, y, accent, onClose }: Props) {
   const { setColorOverride } = useFleetStore();
   const ref = useRef<HTMLDivElement>(null);
+  const [showRuntimePicker, setShowRuntimePicker] = useState(false);
+  const [showModelPicker, setShowModelPicker] = useState(false);
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -35,11 +37,71 @@ export function CardMenu({ agent, x, y, accent, onClose }: Props) {
     } catch {}
   };
 
+  const handleRuntimeChange = async (rt: string) => {
+    setShowRuntimePicker(false);
+    await changeAgent(agent.name, "runtime", rt);
+  };
+
+  const handleModelChange = async (model: string) => {
+    setShowModelPicker(false);
+    await changeAgent(agent.name, "model", model);
+  };
+
+  const isDispatcher = agent.name === "_dispatcher";
+  const models = RUNTIME_MODELS[agent.runtime] || [];
+
   return (
     <div ref={ref} className="menu" style={{ left: x, top: y }} onMouseDown={(e) => e.stopPropagation()}>
-      <div style={{ padding: "6px 10px 2px", fontSize: "9.5px", color: "var(--t-3)", letterSpacing: "0.10em", textTransform: "uppercase", fontWeight: 600 }}>
-        Accent color
-      </div>
+      {/* Runtime / Model section */}
+      {!isDispatcher && (
+        <>
+          <div className="menu-section-label">Runtime</div>
+          <button className="menu-item" onClick={() => { setShowRuntimePicker(!showRuntimePicker); setShowModelPicker(false); }}>
+            <span className="mi-ico"><Icon name="zap" size={13} /></span>
+            <span>{agent.runtime}</span>
+            <span className="mi-chevron">▸</span>
+          </button>
+          {showRuntimePicker && (
+            <div className="menu-sub">
+              {RUNTIMES.map((rt) => (
+                <button
+                  key={rt}
+                  className={"menu-sub-item" + (rt === agent.runtime ? " active" : "")}
+                  onClick={() => handleRuntimeChange(rt)}
+                >
+                  {rt}
+                  {rt === agent.runtime && <span className="mi-check">✓</span>}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="menu-section-label">Model</div>
+          <button className="menu-item" onClick={() => { setShowModelPicker(!showModelPicker); setShowRuntimePicker(false); }}>
+            <span className="mi-ico"><Icon name="cpu" size={13} /></span>
+            <span className="mi-model-name">{agent.model}</span>
+            <span className="mi-chevron">▸</span>
+          </button>
+          {showModelPicker && (
+            <div className="menu-sub">
+              {models.map((m) => (
+                <button
+                  key={m}
+                  className={"menu-sub-item" + (m === agent.model ? " active" : "")}
+                  onClick={() => handleModelChange(m)}
+                >
+                  {m}
+                  {m === agent.model && <span className="mi-check">✓</span>}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <div className="menu-divider"></div>
+        </>
+      )}
+
+      <div className="menu-section-label">Accent color</div>
       <div className="menu-colors">
         {PALETTE.map((c) => (
           <button

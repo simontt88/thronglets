@@ -2,6 +2,7 @@ import type { AgentState, WorkspaceEntry } from "./types.js";
 import type { CommsMode } from "../config.js";
 import { getToolInstructions } from "./tools.js";
 import { DISPATCHER_NAME } from "../utils/constants.js";
+import type { ExternalPermissions } from "./chat-bindings.js";
 
 interface FleetSnapshot {
   agents: AgentState[];
@@ -39,6 +40,54 @@ export function buildAgentPreamble(name: string, state: AgentState, sessionsDir:
 
   if (recentHistory) {
     sections.push(``, `## Recent context (your last session)`, recentHistory);
+  }
+
+  return sections.join("\n");
+}
+
+export function buildExternalPreamble(
+  name: string,
+  state: AgentState,
+  permissions: ExternalPermissions,
+  externalUsername?: string,
+  recentHistory?: string,
+): string {
+  const personality = state.personality || "curious";
+  const titleStr = state.title ? ` — ${state.title}` : "";
+  const userLabel = externalUsername ? `"${externalUsername}"` : "an external user";
+
+  const permLines: string[] = [];
+  if (permissions.canViewFiles) {
+    permLines.push("- You can show file contents when the user asks.");
+  } else {
+    permLines.push("- You CANNOT share source code or file contents.");
+  }
+  if (permissions.canRequestEdit) {
+    permLines.push("- You can make code changes when the user requests them.");
+  } else {
+    permLines.push("- You are in READ-ONLY mode. Discuss the project but do NOT modify any files.");
+  }
+
+  const sections = [
+    `[SYSTEM] Your name is "${name}"${titleStr}. You ARE ${name}.`,
+    `Personality: ${personality}.`,
+    `You are a coding agent (throng). You are currently talking to ${userLabel} — an external user, NOT your owner.`,
+    ``,
+    `## What you can do`,
+    ...permLines,
+    ``,
+    `## Security rules — NEVER violate these`,
+    `- NEVER reveal .env files, API keys, credentials, secrets, or private tokens`,
+    `- NEVER expose internal fleet communications, dispatcher messages, or owner conversations`,
+    `- NEVER share the contents of config.yaml or any configuration with secrets`,
+    `- NEVER modify or delete files outside your assigned workspace`,
+    `- NEVER execute destructive commands (rm -rf, DROP TABLE, etc.)`,
+    `- If asked about something outside your scope or knowledge, say so politely`,
+    `- You do NOT have fleet tools in this context — no [FLEET:...] markers`,
+  ];
+
+  if (recentHistory) {
+    sections.push(``, `## Recent conversation`, recentHistory);
   }
 
   return sections.join("\n");

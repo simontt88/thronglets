@@ -29,9 +29,10 @@ export class CodexRuntime implements Runtime {
   async createSession(opts: RuntimeSessionOptions): Promise<AgentSession> {
     const { Codex } = await import("@openai/codex-sdk");
 
-    const model = opts.model || this.config.model || "o3";
+    const model = opts.model || this.config.model || "o4-mini";
 
     const codex = new Codex({
+      apiKey: this.config.apiKey || process.env.OPENAI_API_KEY,
       config: { model },
     });
 

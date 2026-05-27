@@ -28,3 +28,25 @@ export const STATUS_META: Record<string, { color: string; label: string; mood: s
 export function getAgentColor(runtime: string): string {
   return AGENT_COLORS[runtime] || "#f3c33a";
 }
+
+export const RUNTIME_MODELS: Record<string, string[]> = {
+  cursor: [
+    "claude-opus-4-6",
+    "claude-sonnet-4-6",
+    "gpt-5.3-codex",
+    "claude-4.6-sonnet-medium-thinking",
+  ],
+  "claude-code": [
+    "claude-sonnet-4-6",
+    "claude-opus-4-6",
+  ],
+  codex: [
+    "o4-mini",
+    "o3",
+    "gpt-4.1",
+    "o1",
+    "o1-mini",
+  ],
+};
+
+export const RUNTIMES = ["cursor", "claude-code", "codex"] as const;

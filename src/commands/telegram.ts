@@ -5,8 +5,12 @@ import { TelegramTransport } from "../transports/telegram.js";
 import { startDispatcher, getDispatcherConfig, DISPATCHER_AGENT_NAME } from "../fleet/dispatcher.js";
 import { sendNewPrompt, sendChangePrompt, sendKillPrompt, sendClearPrompt } from "../transports/telegram-buttons.js";
 import { POKE_MESSAGE_WITH_GOAL, POKE_MESSAGE_NO_GOAL } from "../utils/constants.js";
+import { ChatBindingsManager, PERMISSION_PRESETS } from "../fleet/chat-bindings.js";
+import { RateLimiter } from "../transports/rate-limiter.js";
 
 const DISPATCHER_ALIASES = new Set(["D", "d", "dispatch", "dispatcher", "orix"]);
+
+const EXTERNAL_ALLOWED_COMMANDS = new Set(["/start", "/help"]);
 
 function resolveDispatcherAlias(mention: string): string {
   return DISPATCHER_ALIASES.has(mention) ? "_dispatcher" : mention;
@@ -47,17 +51,27 @@ export function setupCommandRouter(deps: CommandRouterDeps): { getNotifyChatId: 
   const { fleet, bus, transport, config, workspaces, version } = deps;
   const dispatcherConfig = getDispatcherConfig(config);
   const cwdAlias = workspaces.find((w) => w.path === config.workspace);
+  const bindings = new ChatBindingsManager();
+  const rateLimiter = new RateLimiter();
+  const externalEnabled = config.fleet.external?.enabled ?? false;
 
   // Seed from config so lifecycle notifications work before the first user message
   const transportConfig = config.telegram || config.lark;
   let notifyChatId: string | null = transportConfig?.allowedChats?.[0] ?? null;
 
   transport.onMessage(async (msg) => {
-    const { chatId, text } = msg;
+    const { chatId, text, username } = msg;
+
+    // External chat routing — check bindings before owner logic
+    if (externalEnabled && bindings.isExternalChat(chatId)) {
+      await handleExternalMessage(chatId, text, username, fleet, transport, bindings, rateLimiter);
+      return;
+    }
+
     notifyChatId = chatId;
 
     if (msg.isCommand) {
-      await handleCommand(chatId, text, deps);
+      await handleCommand(chatId, text, deps, bindings);
       return;
     }
 
@@ -67,10 +81,82 @@ export function setupCommandRouter(deps: CommandRouterDeps): { getNotifyChatId: 
   return { getNotifyChatId: () => notifyChatId };
 }
 
+async function handleExternalMessage(
+  chatId: string,
+  text: string,
+  username: string | undefined,
+  fleet: FleetManager,
+  transport: Transport,
+  bindings: ChatBindingsManager,
+  rateLimiter: RateLimiter,
+): Promise<void> {
+  const binding = bindings.getBinding(chatId);
+  if (!binding || !binding.boundAgent) {
+    await transport.sendReply(chatId, "This chat is no longer connected to an agent.");
+    return;
+  }
+
+  // Handle /start for invite redemption (already bound)
+  if (text.startsWith("/start")) {
+    await transport.sendReply(chatId, `You're connected to @${binding.boundAgent}. Just type to chat!`);
+    return;
+  }
+
+  // External users can only use /help
+  if (text.startsWith("/")) {
+    if (text === "/help") {
+      await transport.sendReply(chatId, [
+        `You're chatting with @${binding.boundAgent}.`,
+        "",
+        "Just type your message — no commands needed.",
+        binding.permissions.canViewFiles ? "You can ask to see files." : "",
+        binding.permissions.canRequestEdit ? "You can ask for code changes." : "",
+      ].filter(Boolean).join("\n"));
+      return;
+    }
+    await transport.sendReply(chatId, "Commands are not available in this chat. Just type your message.");
+    return;
+  }
+
+  // Rate limiting
+  if (rateLimiter.isExceeded(chatId, binding.permissions.maxMessagesPerHour)) {
+    const remaining = rateLimiter.getRemaining(chatId, binding.permissions.maxMessagesPerHour);
+    await transport.sendReply(chatId, `⏳ Rate limit reached (${binding.permissions.maxMessagesPerHour}/hour). Please wait a bit.`);
+    return;
+  }
+
+  // Check agent exists
+  if (!fleet.hasAgent(binding.boundAgent)) {
+    await transport.sendReply(chatId, `@${binding.boundAgent} is currently offline. Please try again later.`);
+    return;
+  }
+
+  await transport.sendTyping(chatId);
+  const typingInterval = setInterval(() => { transport.sendTyping(chatId).catch(() => {}); }, 4000);
+
+  try {
+    const reply = await fleet.sendExternal(
+      binding.boundAgent,
+      chatId,
+      text,
+      binding.permissions,
+      username,
+    );
+    await transport.sendReply(chatId, reply);
+  } catch (err) {
+    const errMsg = err instanceof Error ? err.message : String(err);
+    await transport.sendReply(chatId, "Sorry, something went wrong. Please try again.");
+    console.error(`[external] error for chat ${chatId} → ${binding.boundAgent}: ${errMsg.slice(0, 100)}`);
+  } finally {
+    clearInterval(typingInterval);
+  }
+}
+
 async function handleCommand(
   chatId: string,
   text: string,
   deps: CommandRouterDeps,
+  bindings?: ChatBindingsManager,
 ): Promise<void> {
   const { fleet, bus, transport, config, workspaces, version } = deps;
   const parts = text.split(/\s+/);
@@ -80,6 +166,23 @@ async function handleCommand(
 
   switch (cmd) {
     case "/start": {
+      // Check if this is an invite redemption: /start <token>
+      const inviteToken = args[0];
+      if (inviteToken && bindings) {
+        const result = bindings.redeemInvite(inviteToken, chatId);
+        if (result.success) {
+          await transport.sendReply(chatId, [
+            `🐣 ${result.message}`,
+            "",
+            `You're now chatting with @${result.agent}. Just type your message!`,
+            "Type /help for more info.",
+          ].join("\n"));
+        } else {
+          await transport.sendReply(chatId, `❌ ${result.message}`);
+        }
+        return;
+      }
+
       const runtimes = config.agents.map((a) => `  • ${a.runtime} — ${a.model}`).join("\n");
       const wsList = workspaces.map((w) => `  • ${w.alias} — .../${w.path.split("/").pop()}`).join("\n");
       const currentFleet = fleet.listAgents();
@@ -106,6 +209,10 @@ async function handleCommand(
         "  /poke — nudge dispatcher to assign work",
         "  /goal [text] — view or set fleet goal",
         "  /dispatcher [restart] — dispatcher info / restart",
+        "  /share <name> <chatId> [preset] — share a throng externally",
+        "  /unshare <name|chatId> — revoke external access",
+        "  /invite <name> [preset] — generate invite link",
+        "  /shared — list active external shares",
         "",
         `⚙️ Runtimes:\n${runtimes}`,
         `📁 Workspaces:\n${wsList}`,
@@ -260,6 +367,21 @@ async function handleCommand(
       return;
     }
 
+    case "/reload": {
+      await transport.sendReply(chatId, "🔄 Hot-reload initiated — server will restart momentarily...");
+      const port = process.env.BRIDGE_PORT || "3847";
+      try {
+        const resp = await fetch(`http://127.0.0.1:${port}/reload`, { method: "POST" });
+        if (!resp.ok) {
+          const body = await resp.json().catch(() => ({}));
+          await transport.sendReply(chatId, `❌ Reload failed: ${(body as any).error || resp.statusText}`);
+        }
+      } catch (err) {
+        await transport.sendReply(chatId, `❌ Reload request failed: ${(err as Error).message}`);
+      }
+      return;
+    }
+
     case "/title": {
       const tName = args[0];
       const tTitle = args.slice(1).join(" ");
@@ -328,6 +450,7 @@ async function handleCommand(
         "  /status [name] — detail",
         "  /dispatcher [restart] — dispatcher info",
         "  /workspace [add alias path] — manage workspaces",
+        "  /reload — hot-reload server (zero-downtime)",
       ].join("\n"));
       return;
 

@@ -6,7 +6,7 @@ export interface CursorRuntimeConfig {
 }
 
 const SEND_CALL_TIMEOUT_MS = 60 * 1000; // 60s for the SDK send() call itself
-const WAIT_TIMEOUT_MS = 4.5 * 60 * 1000; // 4.5 min for run.wait() to resolve
+const WAIT_TIMEOUT_MS = 15 * 60 * 1000; // 15 min for run.wait() to resolve
 
 interface RunResult {
   id?: string;
