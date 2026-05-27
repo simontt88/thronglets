@@ -735,7 +735,32 @@ body.theme-dark .md-inline-code { background: rgba(245,166,35,0.1); }
 .md-table tr:last-child td { border-bottom: none; }
 .md-link { color: var(--st-working); text-decoration: none; font-weight: 600; }
 .md-link:hover { text-decoration: underline; }
+.md-img-wrap { display: block; margin: 6px 0; }
+.md-img { max-width: 100%; max-height: 300px; border-radius: 6px; border: 1px solid var(--border-1); cursor: pointer; }
+.md-img:hover { opacity: 0.9; }
 strong { font-weight: 700; color: var(--t-1); }
+
+/* Media attachments in messages */
+.msg-attachments { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.msg-attachment-img { display: inline-block; }
+.msg-attachment-img img {
+  max-width: 100%; max-height: 280px; border-radius: 6px;
+  border: 1px solid var(--border-1); cursor: pointer;
+  transition: opacity 0.15s;
+}
+.msg-attachment-img img:hover { opacity: 0.85; }
+.att-caption { display: block; font-size: 10px; color: var(--t-4); margin-top: 2px; }
+.msg-attachment-file {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 8px; border-radius: 6px; background: var(--bg-2);
+  border: 1px solid var(--border-1); font-size: 11px;
+}
+.att-file-link { color: var(--st-working); text-decoration: none; font-weight: 600; }
+.att-file-link:hover { text-decoration: underline; }
+.att-mime { font-size: 9px; color: var(--t-4); margin-left: 4px; }
+.msg-attachment-generic {
+  font-size: 11px; color: var(--t-3); padding: 3px 0;
+}
 
 ::selection { background: rgba(245,166,35,0.25); color: var(--t-1); }
 
@@ -843,6 +868,30 @@ strong { font-weight: 700; color: var(--t-1); }
 .chatbar-send.ready { color: var(--st-working); }
 .chatbar-send.ready:hover { background: color-mix(in oklab, var(--st-working) 15%, transparent); transform: scale(1.05); }
 .chatbar-send:disabled { opacity: 0.3; cursor: default; }
+
+.chatbar-attach {
+  width: 34px; height: 34px; display: grid; place-items: center;
+  border-radius: 9px; color: var(--t-4); flex-shrink: 0;
+  transition: background 0.12s, color 0.12s;
+}
+.chatbar-attach:hover { color: var(--t-2); background: rgba(245,166,35,0.06); }
+.chatbar-attach:disabled { opacity: 0.3; cursor: default; }
+
+.chatbar-pending-files {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  padding: 4px 12px 6px; font-size: 11px;
+}
+.pending-file-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 10px;
+  background: var(--bg-2); border: 1px solid var(--border-1);
+  color: var(--t-2); font-size: 10px;
+}
+.pending-file-remove {
+  font-size: 13px; color: var(--t-4); cursor: pointer;
+  line-height: 1; padding: 0; margin-left: 2px;
+}
+.pending-file-remove:hover { color: var(--t-1); }
 
 /* CommandBar (Ctrl+K overlay) */
 .cmdbar-overlay {

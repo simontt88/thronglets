@@ -60,7 +60,7 @@ export function setupCommandRouter(deps: CommandRouterDeps): { getNotifyChatId: 
   let notifyChatId: string | null = transportConfig?.allowedChats?.[0] ?? null;
 
   transport.onMessage(async (msg) => {
-    const { chatId, text, username } = msg;
+    const { chatId, text, username, attachments } = msg;
 
     // External chat routing — check bindings before owner logic
     if (externalEnabled && bindings.isExternalChat(chatId)) {
@@ -75,7 +75,21 @@ export function setupCommandRouter(deps: CommandRouterDeps): { getNotifyChatId: 
       return;
     }
 
-    await handleMessage(chatId, text, deps, dispatcherConfig.enabled, cwdAlias);
+    // Build attachment context for the agent
+    let enrichedText = text;
+    if (attachments && attachments.length > 0) {
+      const attachmentDesc = attachments.map((a) => {
+        const parts = [`[Attachment: ${a.type}`];
+        if (a.fileName) parts.push(`name="${a.fileName}"`);
+        if (a.mimeType) parts.push(`mime=${a.mimeType}`);
+        if (a.url) parts.push(`url=${a.url}`);
+        if (a.fileSize) parts.push(`size=${Math.round(a.fileSize / 1024)}KB`);
+        return parts.join(", ") + "]";
+      }).join("\n");
+      enrichedText = enrichedText ? `${enrichedText}\n\n${attachmentDesc}` : attachmentDesc;
+    }
+
+    await handleMessage(chatId, enrichedText, deps, dispatcherConfig.enabled, cwdAlias);
   });
 
   return { getNotifyChatId: () => notifyChatId };

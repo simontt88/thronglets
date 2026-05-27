@@ -148,6 +148,19 @@ const TOOLS: Record<string, ToolDef> = {
     },
   },
 
+  fleet_send_media: {
+    permission: "all",
+    async execute(args, agentName, fleet) {
+      const type = (args.type as string) || "photo";
+      const path = args.path as string;
+      const caption = (args.caption as string) || "";
+      if (!path) return "Error: fleet_send_media requires 'path'";
+      if (type !== "photo" && type !== "document") return "Error: type must be 'photo' or 'document'";
+      fleet.queueOutgoingMedia(agentName, { type: type as "photo" | "document", source: path, caption });
+      return `Media queued: ${type} from ${path}`;
+    },
+  },
+
   fleet_notify_user: {
     permission: "dispatcher",
     async execute(args, _agentName, fleet) {
@@ -233,6 +246,8 @@ You can execute fleet operations by including markers in your reply:
 - List workspaces: [FLEET:fleet_workspace_list:{}]
 - Set agent title: [FLEET:fleet_set_title:{"name":"agentname","title":"QA master"}]
 - Set fleet goal: [FLEET:fleet_set_goal:{"goal":"Build and test the auth module"}]
+- Send media to user: [FLEET:fleet_send_media:{"type":"photo","path":"/abs/path/image.png","caption":"optional caption"}]
+  Types: "photo" (images), "document" (files). Path must be an absolute filesystem path.
 - Notify user on Telegram: [FLEET:fleet_notify_user:{"text":"message","level":"info"}]
   Use this to escalate something to the user. Your replies to system messages are silent by default.
   Levels: "critical" (always delivered), "info" (throttled, for progress updates)
@@ -264,6 +279,8 @@ You can communicate with the dispatcher only (not other agents directly):
 - Send message to dispatcher: [FLEET:fleet_send:{"agent":"_dispatcher","text":"message"}]
 - Send with file paths: [FLEET:fleet_send:{"agent":"_dispatcher","text":"message","files":["/abs/path/file.ts"]}]
 - Get fleet status: [FLEET:fleet_status:{}]
+- Send media to user: [FLEET:fleet_send_media:{"type":"photo","path":"/abs/path/image.png","caption":"optional caption"}]
+  Types: "photo" (images), "document" (files). Path must be an absolute filesystem path.
 
 When reporting task completion, include any file paths the dispatcher might forward to other throngs.
 You CANNOT send messages to other agents — route through the dispatcher.
@@ -279,6 +296,8 @@ You can communicate with other agents by including markers in your reply:
 - Send message to another agent: [FLEET:fleet_send:{"agent":"name","text":"message"}]
 - Send with file paths: [FLEET:fleet_send:{"agent":"name","text":"message","files":["/abs/path/file.ts"]}]
 - Get fleet status: [FLEET:fleet_status:{}]
+- Send media to user: [FLEET:fleet_send_media:{"type":"photo","path":"/abs/path/image.png","caption":"optional caption"}]
+  Types: "photo" (images), "document" (files). Path must be an absolute filesystem path.
 
 Use the "files" field to share file paths when collaborating across workspaces.
 The message will be queued and the other agent will see it tagged with your name.

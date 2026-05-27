@@ -77,11 +77,20 @@ export interface FleetManagerConfig {
 }
 
 
+export interface OutgoingMediaItem {
+  type: "photo" | "document";
+  source: string;
+  caption?: string;
+  fileName?: string;
+  agentName: string;
+}
+
 export type ReplyRoutingCallback = (fromAgent: string, toAgent: string, reply: string) => void;
 export type PeerMessageCallback = (fromAgent: string, toAgent: string, direction: "sent" | "replied") => void;
 export type DispatcherBroadcastCallback = (reply: string, triggerAgent: string) => void;
 export type UserNotificationCallback = (text: string, level: string) => void;
 export type FleetActivityCallback = (event: FleetActivityEvent) => void;
+export type OutgoingMediaCallback = (media: OutgoingMediaItem) => void;
 
 export interface TaskRecord {
   taskId: string;
@@ -107,9 +116,11 @@ export class FleetManager {
   private dispatcherBroadcastCallback: DispatcherBroadcastCallback | null = null;
   private userNotificationCallback: UserNotificationCallback | null = null;
   private fleetActivityCallback: FleetActivityCallback | null = null;
+  private outgoingMediaCallback: OutgoingMediaCallback | null = null;
   private taskLedger: TaskRecord[] = [];
   private workingStartedAt = new Map<string, number>();
   private repliedToDispatcher = new Set<string>();
+  private recentFailures = new Map<string, number[]>(); // agent -> recent failure timestamps (retry-storm guard)
 
   constructor(bus: FleetEventBus, config: FleetManagerConfig) {
     this.bus = bus;
@@ -158,6 +169,15 @@ export class FleetManager {
 
   emitFleetActivity(type: FleetActivityType, agent: string, detail: Record<string, unknown> = {}): void {
     this.fleetActivityCallback?.({ type, agent, detail });
+  }
+
+  onOutgoingMedia(callback: OutgoingMediaCallback): void {
+    this.outgoingMediaCallback = callback;
+  }
+
+  queueOutgoingMedia(agentName: string, media: { type: "photo" | "document"; source: string; caption?: string; fileName?: string }): void {
+    const item: OutgoingMediaItem = { ...media, agentName };
+    this.outgoingMediaCallback?.(item);
   }
 
   getWorkingElapsed(name: string): number | null {
@@ -742,8 +762,14 @@ export class FleetManager {
 
       // Forward non-timeout errors to dispatcher (timeouts are retried silently by the platform)
       if (name !== DISPATCHER_NAME && !isTimeout) {
+        const nowTs = Date.now();
+        const fails = (this.recentFailures.get(name) || []).filter((t) => nowTs - t < 5 * 60 * 1000);
+        fails.push(nowTs);
+        this.recentFailures.set(name, fails);
         const dispLive = this.agents.get(DISPATCHER_NAME);
-        if (dispLive && dispLive.state.status !== "error" && dispLive.state.status !== "dead") {
+        if (fails.length > 2) {
+          console.warn(`[fleet] ${name}: ${fails.length} failures in 5min — suppressing dispatcher notification (retry-storm guard)`);
+        } else if (dispLive && dispLive.state.status !== "error" && dispLive.state.status !== "dead") {
           const briefErr = errMsg.length > 200 ? errMsg.slice(0, 200) + "…" : errMsg;
           this.send(DISPATCHER_NAME, `Agent "${name}" hit an error: ${briefErr}\nStatus: ${live.state.status}. It will auto-recover when you send it another message — just re-send the task. Do NOT kill or re-hatch.`, name)
             .catch((e) => console.warn(`[fleet] failed to notify dispatcher of ${name} error: ${(e as Error).message?.slice(0, 60)}`));

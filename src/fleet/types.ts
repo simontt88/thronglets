@@ -51,11 +51,21 @@ export interface FleetState {
   lastUpdated: string;
 }
 
+export interface MediaAttachmentMeta {
+  type: "photo" | "document" | "video" | "voice" | "animation";
+  fileId?: string;
+  fileName?: string;
+  mimeType?: string;
+  url?: string;
+  caption?: string;
+}
+
 export type MessageSender = "user" | string; // "user" or agent name
 
 export interface QueuedMessage {
   text: string;
   sender: MessageSender;
+  attachments?: MediaAttachmentMeta[];
   resolve: (reply: string) => void;
   reject: (err: Error) => void;
 }

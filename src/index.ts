@@ -287,6 +287,24 @@ async function main() {
     }
   });
 
+  // Outgoing media callback — throng→user media delivery
+  fleet.onOutgoingMedia((media) => {
+    const chatId = getNotifyChatId();
+    if (!chatId) {
+      console.warn(`[media] no chat ID available to send media from ${media.agentName}`);
+      return;
+    }
+    console.log(`[media] ${media.agentName} sending ${media.type}: ${media.source}`);
+    transport.sendMedia(chatId, {
+      type: media.type,
+      source: media.source,
+      caption: media.caption ? `[${media.agentName}] ${media.caption}` : `[${media.agentName}]`,
+      fileName: media.fileName,
+    }).catch((err: unknown) => {
+      console.error(`[media] failed to send: ${(err as Error).message}`);
+    });
+  });
+
   // Notification throttle for dispatcher→user messages
   const notifThrottle = new NotificationThrottle(config.fleet.notificationCooldownMs);
 

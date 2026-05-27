@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from "react";
-import { useFleetStore, fetchSessionList, fetchSessionEvents, getAgentAccent, setAgentTitle } from "../stores/fleet";
-import type { AgentState, SessionEvent } from "../stores/fleet";
+import { useFleetStore, fetchSessionList, fetchSessionEvents, getAgentAccent, setAgentTitle, serverBase } from "../stores/fleet";
+import type { AgentState, SessionEvent, SessionMediaAttachment } from "../stores/fleet";
 import { STATUS_META } from "../lib/constants";
 import { renderMarkdown } from "../lib/markdown";
 import { Icon } from "./Icons";
@@ -250,8 +250,47 @@ function MessageBubble({ event, accent, isDispatcher }: { event: SessionEvent; a
       <div className="msg-label">{labelIcon} {displayName}</div>
       <div className="msg-body">
         {isUser ? body : renderMarkdown(body)}
+        {event.attachments && event.attachments.length > 0 && (
+          <MediaAttachments attachments={event.attachments} />
+        )}
       </div>
       <div className="msg-time">{formatTime(event.ts)}</div>
+    </div>
+  );
+}
+
+function MediaAttachments({ attachments }: { attachments: SessionMediaAttachment[] }) {
+  return (
+    <div className="msg-attachments">
+      {attachments.map((att, i) => {
+        if (att.type === "photo" && att.url) {
+          const imgSrc = att.url.startsWith("http") ? att.url : `${serverBase.http}/api/media?path=${encodeURIComponent(att.url)}`;
+          return (
+            <div key={i} className="msg-attachment-img">
+              <a href={imgSrc} target="_blank" rel="noopener">
+                <img src={imgSrc} alt={att.caption || "photo"} loading="lazy" />
+              </a>
+              {att.caption && <span className="att-caption">{att.caption}</span>}
+            </div>
+          );
+        }
+        if (att.type === "document") {
+          const fileUrl = att.url?.startsWith("http") ? att.url : att.url ? `${serverBase.http}/api/media?path=${encodeURIComponent(att.url)}` : "#";
+          return (
+            <div key={i} className="msg-attachment-file">
+              <a href={fileUrl} target="_blank" rel="noopener" className="att-file-link">
+                📎 {att.fileName || "document"}
+                {att.mimeType && <span className="att-mime">{att.mimeType}</span>}
+              </a>
+            </div>
+          );
+        }
+        return (
+          <div key={i} className="msg-attachment-generic">
+            📎 {att.type}: {att.fileName || att.caption || "attachment"}
+          </div>
+        );
+      })}
     </div>
   );
 }

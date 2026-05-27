@@ -3,9 +3,12 @@ import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import type { FleetManager } from "../fleet/index.js";
 import type { BridgeConfig, RuntimeType } from "../config.js";
-import { readdirSync, readFileSync, existsSync } from "fs";
+import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync as fsWriteFileSync } from "fs";
 import { getSessionsDir } from "../fleet/state.js";
 import { DISPATCHER_NAME, POKE_MESSAGE_WITH_GOAL, POKE_MESSAGE_NO_GOAL } from "../utils/constants.js";
+import { GLOBAL_CONFIG_DIR } from "../config.js";
+
+const UPLOADS_DIR = join(GLOBAL_CONFIG_DIR, "uploads");
 
 export type ReloadCallback = () => void;
 let _reloadCallback: ReloadCallback | null = null;
@@ -284,6 +287,32 @@ export function createHttpApp(
     const failed = tasks.filter((t) => t.status === "failed").length;
     const pending = tasks.filter((t) => t.status === "dispatched").length;
     res.json({ tasks, stats: { completed, failed, pending, total: tasks.length } });
+  });
+
+  app.post("/api/upload", express.raw({ type: "*/*", limit: "20mb" }), (req, res) => {
+    const fileName = (req.query.name as string) || `upload-${Date.now()}`;
+    const sanitized = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+    try {
+      mkdirSync(UPLOADS_DIR, { recursive: true });
+      const filePath = join(UPLOADS_DIR, sanitized);
+      fsWriteFileSync(filePath, req.body);
+      res.json({ path: filePath, name: sanitized });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get("/api/media", (req, res) => {
+    const filePath = req.query.path as string;
+    if (!filePath) {
+      res.status(400).json({ error: "path query parameter is required" });
+      return;
+    }
+    if (!existsSync(filePath)) {
+      res.status(404).json({ error: "file not found" });
+      return;
+    }
+    res.sendFile(filePath);
   });
 
   app.post("/reload", (_req, res) => {

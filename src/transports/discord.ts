@@ -1,4 +1,4 @@
-import type { Transport, IncomingMessage } from "./interface.js";
+import type { Transport, IncomingMessage, OutgoingMedia } from "./interface.js";
 import type { DiscordConfig } from "../config.js";
 import { splitText } from "../utils/chunk-text.js";
 
@@ -95,6 +95,11 @@ export class DiscordTransport implements Transport {
 
   onMessage(handler: (msg: IncomingMessage) => Promise<void>): void {
     this.handler = handler;
+  }
+
+  async sendMedia(chatId: string, media: OutgoingMedia): Promise<void> {
+    const caption = media.caption ? `📎 ${media.caption}` : `📎 ${media.source}`;
+    await this.sendReply(chatId, caption);
   }
 
   async sendReply(chatId: string, text: string): Promise<void> {
