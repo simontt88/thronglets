@@ -13,6 +13,19 @@ interface FleetSnapshot {
   dead: number;
 }
 
+const HUMAN_OUTPUT_RULES = [
+  `## Standing rules — human-facing output (NEVER violate)`,
+  `- The human reads on a messaging channel (often mobile). They CANNOT open local file paths. NEVER hand them a deliverable as a local path (e.g. /home/..., repo/docs/*.md) — give a shareable link, or paste the content/summary inline.`,
+  `- Anything you publish or share externally defaults to PRIVATE/unlisted. NEVER make an artifact public without the human's explicit approval; if something went public by mistake, revert it immediately.`,
+  `- Treat the human's stated preferences as STANDING constraints, not one-off requests. If they correct how you deliver something, it applies to ALL future work — persist it to your workspace AGENTS.md / memory so it survives session resets.`,
+].join("\n");
+
+const DISPATCHER_DISCIPLINE = [
+  `## Discipline — context hygiene & delivery`,
+  `- Throng error/timeout reports auto-recover (system retries 3x). Do NOT analyze or write a long reply per error — acknowledge in one short line. Escalate to the human (fleet_notify_user) only if the SAME throng fails 3+ times in a row.`,
+  `- Don't write big analyses, PRDs, or plans yourself — route them to a throng. Keep YOUR replies to the human short: a link + a one-line summary + the decision you need.`,
+].join("\n");
+
 export function buildAgentPreamble(name: string, state: AgentState, sessionsDir: string, commsMode: CommsMode = "hive", recentHistory?: string): string {
   const titleStr = state.title ? ` — ${state.title}` : "";
   const personality = state.personality || "curious";
@@ -36,6 +49,8 @@ export function buildAgentPreamble(name: string, state: AgentState, sessionsDir:
     "",
     getToolInstructions(false, commsMode),
     ...autoReport,
+    ``,
+    HUMAN_OUTPUT_RULES,
   ];
 
   if (recentHistory) {
@@ -165,6 +180,10 @@ export function buildDispatcherPreamble(
     `The user can @mention and command any throng directly, bypassing you. This is normal.`,
     `When a throng does something you didn't assign, check its "📩 user direct" in the fleet list — the user likely gave it instructions directly.`,
     `Don't question or override work the user initiated directly. Just stay aware of it for coordination.`,
+    ``,
+    HUMAN_OUTPUT_RULES,
+    ``,
+    DISPATCHER_DISCIPLINE,
     ``,
     getToolInstructions(true),
     ``,
