@@ -10,7 +10,8 @@ import { FleetManager, FleetEventBus } from "./fleet/index.js";
 import { loadWorkspaces as loadWorkspacesFromState } from "./fleet/state.js";
 import type { WorkspaceEntry } from "./fleet/index.js";
 import { syncRules } from "./rules-sync.js";
-import { startServer } from "./server/index.js";
+import { createServerApp, listenServer } from "./server/index.js";
+import { setReloadCallback, setPromoteCallback } from "./server/http.js";
 import { setupInlineButtons } from "./transports/telegram-buttons.js";
 import type { Runtime } from "./runtimes/interface.js";
 import { startDispatcher, getDispatcherConfig, DISPATCHER_AGENT_NAME } from "./fleet/dispatcher.js";
@@ -19,16 +20,91 @@ import { setupCommandRouter } from "./commands/telegram.js";
 import { NotificationThrottle } from "./notifications.js";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { readFileSync } from "fs";
+import { readFileSync, writeFileSync, existsSync, unlinkSync } from "fs";
+import { spawn } from "child_process";
+import type { Server as HttpServer } from "http";
+import type { Transport } from "./transports/interface.js";
+import { GLOBAL_CONFIG_DIR } from "./config.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, "../package.json"), "utf-8"));
 const VERSION: string = pkg.version;
 
 const RESTART_DELAY_MS = 10000;
+const RELOAD_HEALTH_TIMEOUT_MS = 15_000;
+const RELOAD_LOG_FILE = join(GLOBAL_CONFIG_DIR, "reload.log");
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+function reloadLog(msg: string): void {
+  const line = `[${new Date().toISOString()}] ${msg}\n`;
+  try { writeFileSync(RELOAD_LOG_FILE, line, { flag: "a" }); } catch {}
+  console.log(`[reload] ${msg}`);
+}
+
+// ─── Graceful Shutdown ───
+
+let _httpServer: HttpServer | null = null;
+let _transport: Transport | null = null;
+let _fleet: FleetManager | null = null;
+let _heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let _shuttingDown = false;
+
+async function gracefulShutdown(reason: string): Promise<void> {
+  if (_shuttingDown) return;
+  _shuttingDown = true;
+  console.log(`\n[shutdown] initiated — ${reason}`);
+
+  if (_heartbeatTimer) clearInterval(_heartbeatTimer);
+
+  if (_fleet) {
+    try { await _fleet.gracefulShutdown(); }
+    catch (e) { console.warn(`[shutdown] fleet error: ${(e as Error).message}`); }
+  }
+
+  if (_transport) {
+    try { await _transport.stop(); }
+    catch (e) { console.warn(`[shutdown] transport error: ${(e as Error).message}`); }
+  }
+
+  if (_httpServer) {
+    await new Promise<void>((resolve) => {
+      _httpServer!.close(() => resolve());
+      setTimeout(resolve, 5000);
+    });
+    console.log(`[shutdown] HTTP server closed`);
+  }
+
+  console.log(`[shutdown] complete`);
+}
+
+// ─── Hot-Reload ───
+
+function triggerReload(): void {
+  reloadLog(`reload triggered (pid=${process.pid})`);
+
+  const scriptPath = join(__dirname, "../scripts/reload.sh");
+  if (!existsSync(scriptPath)) {
+    reloadLog(`ERROR: reload script not found at ${scriptPath}`);
+    return;
+  }
+
+  const port = process.env.BRIDGE_PORT || "3847";
+  const child = spawn("bash", [scriptPath], {
+    detached: true,
+    stdio: "ignore",
+    env: {
+      ...process.env,
+      RELOAD_OLD_PID: String(process.pid),
+      RELOAD_PORT: port,
+      RELOAD_CWD: process.cwd(),
+      RELOAD_LOG: RELOAD_LOG_FILE,
+    },
+  });
+  child.unref();
+  reloadLog(`reload script spawned (orchestrator pid=${child.pid})`);
 }
 
 function createTransport(cfg: BridgeConfig) {
@@ -65,7 +141,7 @@ function createRuntime(agent: AgentDef): Runtime {
         allowedTools: agent.allowedTools, disallowedTools: agent.disallowedTools,
       });
     case "codex":
-      return new CodexRuntime({ model: agent.model, approvalPolicy: agent.approvalPolicy });
+      return new CodexRuntime({ model: agent.model, apiKey: agent.apiKey, approvalPolicy: agent.approvalPolicy });
     default:
       console.error(`[fatal] unsupported runtime: ${agent.runtime}`);
       process.exit(1);
@@ -102,7 +178,12 @@ async function main() {
     getAgentDef: (runtime: RuntimeType, model?: string) => {
       const match = config.agents.find((a) => a.runtime === runtime);
       if (match) return model ? { ...match, model } : match;
-      return { name: runtime, runtime, apiKey: "", model: model || "claude-sonnet-4-6" };
+      const defaultModels: Record<string, string> = {
+        cursor: "claude-sonnet-4-6",
+        "claude-code": "claude-sonnet-4-6",
+        codex: "o4-mini",
+      };
+      return { name: runtime, runtime, apiKey: "", model: model || defaultModels[runtime] || "claude-sonnet-4-6" };
     },
     commsMode: config.fleet.comms,
     timeouts: config.fleet.timeouts,
@@ -219,8 +300,12 @@ async function main() {
 
   // Start dispatcher + server
   const dispatcherConfig = getDispatcherConfig(config);
-  await startDispatcher(fleet, bus, config, workspaces);
-  const { port } = startServer(fleet, bus, config, workspaces);
+
+  setReloadCallback(triggerReload);
+
+  const realPort = parseInt(process.env.BRIDGE_PORT || "") || 3847;
+  const port = realPort;
+  const app = createServerApp(fleet, config);
 
   // Event logging
   bus.onEvent((event) => {
@@ -228,11 +313,65 @@ async function main() {
     console.log(`[fleet] ${event.type} agent=${event.agentName} session=${event.sessionId.slice(0, 12)}${detail}`);
   });
 
-  await transport.start();
+  // goLive: bind the real port + start dispatcher + Telegram polling.
+  // Called immediately on a normal launch, or via /promote after a standby boot.
+  let _live = false;
+  const goLive = async (): Promise<void> => {
+    if (_live) return;
+    await startDispatcher(fleet, bus, config, workspaces);
+    let liveServer: HttpServer | null = null;
+    let lastErr = "";
+    for (let attempt = 0; attempt < 15 && !liveServer; attempt++) {
+      try {
+        const s = listenServer(app, fleet, bus, config, workspaces, realPort);
+        await new Promise<void>((resolve, reject) => {
+          s.once("listening", () => resolve());
+          s.once("error", (e) => reject(e));
+          if (s.listening) resolve();
+          setTimeout(() => reject(new Error("listen timeout")), 2000);
+        });
+        liveServer = s;
+      } catch (e) {
+        lastErr = e instanceof Error ? e.message : String(e);
+        await sleep(400);
+      }
+    }
+    if (!liveServer) throw new Error(`bind :${realPort} failed after retries: ${lastErr}`);
+    _httpServer = liveServer;
+    await transport.start();
+    if (transport instanceof TelegramTransport) {
+      const bot = transport.getBot();
+      if (bot) setupInlineButtons(bot, fleet, config, workspaces);
+    }
+    _live = true;
+    reloadLog(`live on :${realPort} (telegram polling started)`);
+  };
 
-  if (transport instanceof TelegramTransport) {
-    const bot = transport.getBot();
-    if (bot) setupInlineButtons(bot, fleet, config, workspaces);
+  _transport = transport;
+  _fleet = fleet;
+
+  const standbyPortRaw = process.env.RELOAD_STANDBY_PORT;
+  if (standbyPortRaw) {
+    // Standby boot: validate THIS process without disturbing the live server.
+    const standbyPort = parseInt(standbyPortRaw, 10);
+    const standbyServer = listenServer(app, fleet, bus, config, workspaces, standbyPort);
+    _httpServer = standbyServer;
+    reloadLog(`standby: HTTP on :${standbyPort}, telegram OFF, awaiting /promote`);
+    console.log(`[standby] booted on :${standbyPort} (fleet ${fleet.listAgents().length}), telegram OFF, awaiting /promote`);
+    setPromoteCallback(async () => {
+      try {
+        await goLive();
+        try { standbyServer.close(); } catch {}
+        reloadLog(`promoted: live on :${realPort}, standby :${standbyPort} closed`);
+        return { ok: true };
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        reloadLog(`promote FAILED: ${msg}`);
+        return { ok: false, error: msg };
+      }
+    });
+  } else {
+    await goLive();
   }
 
   console.log(`\nThronglets v${VERSION}`);
@@ -263,7 +402,7 @@ async function main() {
     }
   });
 
-  setInterval(async () => {
+  _heartbeatTimer = setInterval(async () => {
     const s = fleet.getStatus();
     const nonDispatcher = s.agents.filter((a) => a.name !== DISPATCHER_AGENT_NAME);
     console.log(`[heartbeat] ${new Date().toISOString()} fleet=${s.total} working=${s.working} dead=${s.dead}`);
@@ -356,6 +495,20 @@ async function run() {
 
 run();
 
-process.on("SIGINT", () => { console.log("\nShutting down..."); process.exit(0); });
+process.on("SIGINT", async () => {
+  await gracefulShutdown("SIGINT");
+  process.exit(0);
+});
+
+process.on("SIGTERM", async () => {
+  await gracefulShutdown("SIGTERM");
+  process.exit(0);
+});
+
+process.on("SIGUSR2", () => {
+  reloadLog("SIGUSR2 received — initiating hot-reload");
+  triggerReload();
+});
+
 process.on("uncaughtException", (err) => { console.error(`[uncaught] ${err.message}`); console.error(err.stack); });
 process.on("unhandledRejection", (reason) => { console.error(`[unhandled-rejection] ${reason}`); });

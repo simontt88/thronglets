@@ -38,14 +38,10 @@ function findChillDir(): string | null {
   return null;
 }
 
-export function startServer(
+export function createServerApp(
   fleet: FleetManager,
-  bus: FleetEventBus,
   config: BridgeConfig,
-  workspaces: WorkspaceEntry[],
-): { port: number } {
-  const port = parseInt(process.env.BRIDGE_PORT || "") || DEFAULT_PORT;
-
+): express.Application {
   const app = createHttpApp(fleet, config);
 
   // Serve chill mode (thronglets-viz) static files
@@ -82,13 +78,34 @@ pre{background:#f1f5f9;padding:16px;border-radius:8px;overflow-x:auto}</style></
     console.log("[server] Dashboard: not built — serving fallback page. Run: cd packages/dashboard && npm install && npm run build");
   }
 
+  return app;
+}
+
+export function listenServer(
+  app: express.Application,
+  fleet: FleetManager,
+  bus: FleetEventBus,
+  config: BridgeConfig,
+  workspaces: WorkspaceEntry[],
+  port: number,
+): import("http").Server {
   const server = createServer(app);
   attachWebSocket(server, fleet, bus, config, workspaces);
-
   server.listen(port, "127.0.0.1", () => {
     console.log(`[server] API: http://127.0.0.1:${port}`);
     console.log(`[server] WS:  ws://127.0.0.1:${port}/ws`);
   });
+  return server;
+}
 
-  return { port };
+export function startServer(
+  fleet: FleetManager,
+  bus: FleetEventBus,
+  config: BridgeConfig,
+  workspaces: WorkspaceEntry[],
+): { port: number; server: import("http").Server } {
+  const port = parseInt(process.env.BRIDGE_PORT || "") || DEFAULT_PORT;
+  const app = createServerApp(fleet, config);
+  const server = listenServer(app, fleet, bus, config, workspaces, port);
+  return { port, server };
 }

@@ -7,6 +7,14 @@ import { readdirSync, readFileSync, existsSync } from "fs";
 import { getSessionsDir } from "../fleet/state.js";
 import { DISPATCHER_NAME, POKE_MESSAGE_WITH_GOAL, POKE_MESSAGE_NO_GOAL } from "../utils/constants.js";
 
+export type ReloadCallback = () => void;
+let _reloadCallback: ReloadCallback | null = null;
+export function setReloadCallback(cb: ReloadCallback): void { _reloadCallback = cb; }
+
+export type PromoteCallback = () => Promise<{ ok: boolean; error?: string }>;
+let _promoteCallback: PromoteCallback | null = null;
+export function setPromoteCallback(cb: PromoteCallback): void { _promoteCallback = cb; }
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, "../../package.json"), "utf-8"));
 const VERSION = pkg.version as string;
@@ -259,6 +267,48 @@ export function createHttpApp(
     }
     fleet.setGoal(goal);
     res.json({ ok: true, goal });
+  });
+
+  app.get("/api/fleet/task-log", (req, res) => {
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+    const format = req.query.format as string;
+
+    if (format === "raw") {
+      const entries = fleet.getTaskLogEntries(limit);
+      res.json({ entries, count: entries.length });
+      return;
+    }
+
+    const tasks = fleet.getTaskLogRaw(limit);
+    const completed = tasks.filter((t) => t.status === "completed").length;
+    const failed = tasks.filter((t) => t.status === "failed").length;
+    const pending = tasks.filter((t) => t.status === "dispatched").length;
+    res.json({ tasks, stats: { completed, failed, pending, total: tasks.length } });
+  });
+
+  app.post("/reload", (_req, res) => {
+    if (!_reloadCallback) {
+      res.status(501).json({ error: "Hot-reload not available — server not started with reload support" });
+      return;
+    }
+    console.log(`[reload] triggered via POST /reload`);
+    res.json({ ok: true, message: "Reload initiated — new process starting" });
+    setTimeout(() => _reloadCallback!(), 100);
+  });
+
+  app.post("/promote", async (_req, res) => {
+    if (!_promoteCallback) {
+      res.status(501).json({ error: "Not in standby mode" });
+      return;
+    }
+    console.log(`[promote] triggered via POST /promote`);
+    try {
+      const result = await _promoteCallback();
+      if (result.ok) { res.json({ ok: true, message: "Promoted to live" }); }
+      else { res.status(500).json({ ok: false, error: result.error }); }
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
   });
 
   return app;
