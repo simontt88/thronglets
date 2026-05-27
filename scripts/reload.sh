@@ -44,6 +44,7 @@ kill_tree() {  # SIGTERM then SIGKILL a pid and its direct children
 
 start_server() {  # arg1: standby port (empty for normal). echoes new pid.
   cd "$CWD"
+  export BRIDGE_CURSOR_WAIT_MS="${BRIDGE_CURSOR_WAIT_MS:-3600000}"  # durable 1h cursor run-wait
   local sb="${1:-}"
   if [ -x "$TSX_BIN" ]; then
     if [ -n "$sb" ]; then

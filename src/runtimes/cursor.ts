@@ -6,7 +6,7 @@ export interface CursorRuntimeConfig {
 }
 
 const SEND_CALL_TIMEOUT_MS = 60 * 1000; // 60s for the SDK send() call itself
-const WAIT_TIMEOUT_MS = 15 * 60 * 1000; // 15 min for run.wait() to resolve
+const WAIT_TIMEOUT_MS = parseInt(process.env.BRIDGE_CURSOR_WAIT_MS || "", 10) || 60 * 60 * 1000; // default 1h (3600000ms); override via BRIDGE_CURSOR_WAIT_MS env
 
 interface RunResult {
   id?: string;
@@ -74,13 +74,14 @@ class CursorSession implements AgentSession {
       ]);
 
       if (result.status === "error") {
-        throw new Error(`Cursor run failed (status=error, id=${result.id ?? "?"})`);
+        const detail = JSON.stringify(result).slice(0, 800);
+        throw new Error(`Cursor run failed (status=error, id=${result.id ?? "?"}): ${detail}`);
       }
       if (result.status === "cancelled") {
         throw new Error(`Cursor run was cancelled (id=${result.id ?? "?"})`);
       }
       if (!result.result) {
-        const detail = JSON.stringify({ status: result.status, id: result.id, durationMs: result.durationMs });
+        const detail = JSON.stringify(result).slice(0, 800);
         throw new Error(`Cursor returned empty result: ${detail}`);
       }
       return result.result;
