@@ -1,5 +1,5 @@
 import express from "express";
-import { join, dirname } from "path";
+import { join, dirname, resolve, relative, isAbsolute } from "path";
 import { fileURLToPath } from "url";
 import type { FleetManager } from "../fleet/index.js";
 import type { BridgeConfig, RuntimeType } from "../config.js";
@@ -9,6 +9,38 @@ import { DISPATCHER_NAME, POKE_MESSAGE_WITH_GOAL, POKE_MESSAGE_NO_GOAL } from ".
 import { GLOBAL_CONFIG_DIR } from "../config.js";
 
 const UPLOADS_DIR = join(GLOBAL_CONFIG_DIR, "uploads");
+const SESSIONS_ROOT = join(GLOBAL_CONFIG_DIR, "sessions");
+
+const EXTRA_ALLOWED_ORIGINS = new Set(
+  (process.env.BRIDGE_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+
+function isLoopbackOrigin(origin: string): boolean {
+  try {
+    const u = new URL(origin);
+    return u.hostname === "127.0.0.1" || u.hostname === "localhost" || u.hostname === "[::1]";
+  } catch {
+    return false;
+  }
+}
+
+function isOriginAllowed(origin: string | undefined): boolean {
+  if (!origin) return true;
+  return isLoopbackOrigin(origin) || EXTRA_ALLOWED_ORIGINS.has(origin);
+}
+
+function isMediaPathAllowed(filePath: string, fleet: FleetManager): boolean {
+  const target = resolve(filePath);
+  const roots = [UPLOADS_DIR, SESSIONS_ROOT, ...fleet.listWorkspaces().map((w) => w.path)]
+    .map((p) => resolve(p));
+  return roots.some((root) => {
+    const rel = relative(root, target);
+    return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  });
+}
 
 export type ReloadCallback = () => void;
 let _reloadCallback: ReloadCallback | null = null;
@@ -30,11 +62,24 @@ export function createHttpApp(
   const app = express();
   app.use(express.json());
 
-  app.use((_req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+  app.use((req, res, next) => {
+    const origin = req.header("Origin");
+    const allowed = isOriginAllowed(origin);
+    if (origin && allowed) {
+      res.header("Access-Control-Allow-Origin", origin);
+      res.header("Vary", "Origin");
+      res.header("Access-Control-Allow-Credentials", "true");
+    }
+    res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, PATCH, OPTIONS");
     res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    if (_req.method === "OPTIONS") { res.sendStatus(204); return; }
+    if (req.method === "OPTIONS") {
+      res.sendStatus(allowed ? 204 : 403);
+      return;
+    }
+    if (!allowed) {
+      res.status(403).json({ error: "Origin not allowed" });
+      return;
+    }
     next();
   });
 
@@ -308,11 +353,16 @@ export function createHttpApp(
       res.status(400).json({ error: "path query parameter is required" });
       return;
     }
-    if (!existsSync(filePath)) {
+    if (!isMediaPathAllowed(filePath, fleet)) {
+      res.status(403).json({ error: "path not allowed" });
+      return;
+    }
+    const resolved = resolve(filePath);
+    if (!existsSync(resolved)) {
       res.status(404).json({ error: "file not found" });
       return;
     }
-    res.sendFile(filePath);
+    res.sendFile(resolved);
   });
 
   app.post("/reload", (_req, res) => {
