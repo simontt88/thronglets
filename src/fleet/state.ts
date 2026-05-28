@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync, readdirSync, copyFileSync, statSync } from "fs";
+import { readFileSync, writeFileSync, appendFileSync, renameSync, mkdirSync, existsSync, readdirSync, copyFileSync, statSync } from "fs";
 import { join } from "path";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { FleetState, AgentState, WorkspaceEntry } from "./types.js";
@@ -191,6 +191,116 @@ export function getFleetDir(): string {
   const dir = resolveFleetDir();
   ensureDir(dir);
   return dir;
+}
+
+// ─── Persistent Task Log (JSONL) ───
+
+const TASK_LOG_FILE = join(FLEET_DIR, "task-log.jsonl");
+const MAX_TASK_LOG_BYTES = 2 * 1024 * 1024; // 2 MB — auto-rotate
+
+function getTaskLogFile(): string {
+  return _testDir ? join(_testDir, "task-log.jsonl") : TASK_LOG_FILE;
+}
+
+export interface TaskLogEntry {
+  ts: string;
+  event: "dispatched" | "completed" | "failed";
+  taskId: string;
+  agent: string;
+  task?: string;
+  from?: string;
+  durationMs?: number;
+  result?: string;
+}
+
+let _taskIdCounter = 0;
+
+export function generateTaskId(): string {
+  const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  const rand = Math.random().toString(36).slice(2, 6);
+  _taskIdCounter++;
+  return `t-${date}-${rand}${_taskIdCounter}`;
+}
+
+export function appendTaskLog(entry: TaskLogEntry): void {
+  const file = getTaskLogFile();
+  ensureDir(resolveFleetDir());
+  try {
+    if (existsSync(file)) {
+      const stat = statSync(file);
+      if (stat.size > MAX_TASK_LOG_BYTES) {
+        const rotated = file + `.${Date.now()}.bak`;
+        renameSync(file, rotated);
+        console.log(`[task-log] rotated → ${rotated}`);
+      }
+    }
+    appendFileSync(file, JSON.stringify(entry) + "\n");
+  } catch (err) {
+    console.warn(`[task-log] write failed: ${(err as Error).message}`);
+  }
+}
+
+export function readTaskLog(limit = 50): TaskLogEntry[] {
+  const file = getTaskLogFile();
+  if (!existsSync(file)) return [];
+  try {
+    const content = readFileSync(file, "utf-8").trim();
+    if (!content) return [];
+    const lines = content.split("\n");
+    const recent = lines.slice(-limit * 2);
+    const entries: TaskLogEntry[] = [];
+    for (const line of recent) {
+      try { entries.push(JSON.parse(line)); } catch { /* skip */ }
+    }
+    return entries.slice(-limit);
+  } catch {
+    return [];
+  }
+}
+
+export function reconstructTaskLedger(limit = 50): Array<{
+  taskId: string;
+  assignedAt: string;
+  agent: string;
+  task: string;
+  status: "dispatched" | "completed" | "failed";
+  completedAt?: string;
+  result?: string;
+  durationMs?: number;
+}> {
+  const entries = readTaskLog(limit * 3);
+  const tasks = new Map<string, {
+    taskId: string;
+    assignedAt: string;
+    agent: string;
+    task: string;
+    status: "dispatched" | "completed" | "failed";
+    completedAt?: string;
+    result?: string;
+    durationMs?: number;
+  }>();
+
+  for (const e of entries) {
+    if (e.event === "dispatched") {
+      tasks.set(e.taskId, {
+        taskId: e.taskId,
+        assignedAt: e.ts,
+        agent: e.agent,
+        task: e.task || "",
+        status: "dispatched",
+      });
+    } else {
+      const t = tasks.get(e.taskId);
+      if (t) {
+        t.status = e.event;
+        t.completedAt = e.ts;
+        t.result = e.result;
+        t.durationMs = e.durationMs;
+      }
+    }
+  }
+
+  return [...tasks.values()].slice(-limit);
 }
 
 export function loadWorkspaces(): WorkspaceEntry[] {

@@ -35,6 +35,12 @@ export function Icon({ name, size = 14 }: { name: string; size?: number }) {
       return <svg {...base}><path d="m3 13 1-3 7-7 2 2-7 7-3 1Z" stroke={SC} strokeWidth={sw} strokeLinejoin={lj}/></svg>;
     case "paint":
       return <svg {...base}><circle cx="8" cy="8" r="5.5" stroke={SC} strokeWidth={sw}/><circle cx="5.5" cy="6.5" r="1" fill={SC}/><circle cx="10.5" cy="6.5" r="1" fill={SC}/><circle cx="6.5" cy="10.5" r="1" fill={SC}/><circle cx="10.5" cy="10.5" r="1" fill={SC}/></svg>;
+    case "zap":
+      return <svg {...base}><path d="M9 2 4 9h4l-1 5 5-7H8l1-5Z" stroke={SC} strokeWidth={sw} strokeLinejoin={lj} fill={SC} fillOpacity={0.12}/></svg>;
+    case "cpu":
+      return <svg {...base}><rect x="4" y="4" width="8" height="8" rx="1" stroke={SC} strokeWidth={sw}/><path d="M6 1.5v2M10 1.5v2M6 12.5v2M10 12.5v2M1.5 6h2M1.5 10h2M12.5 6h2M12.5 10h2" stroke={SC} strokeWidth={sw} strokeLinecap={lc}/></svg>;
+    case "paperclip":
+      return <svg {...base}><path d="M6.5 12.5a3 3 0 0 1-3-3V5a2 2 0 0 1 4 0v5a1 1 0 0 1-2 0V5.5" stroke={SC} strokeWidth={sw} strokeLinecap={lc} strokeLinejoin={lj}/></svg>;
     default: return null;
   }
 }

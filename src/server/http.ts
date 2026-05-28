@@ -1,11 +1,54 @@
 import express from "express";
-import { join, dirname } from "path";
+import { join, dirname, resolve, relative, isAbsolute } from "path";
 import { fileURLToPath } from "url";
 import type { FleetManager } from "../fleet/index.js";
 import type { BridgeConfig, RuntimeType } from "../config.js";
-import { readdirSync, readFileSync, existsSync } from "fs";
+import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync as fsWriteFileSync } from "fs";
 import { getSessionsDir } from "../fleet/state.js";
 import { DISPATCHER_NAME, POKE_MESSAGE_WITH_GOAL, POKE_MESSAGE_NO_GOAL } from "../utils/constants.js";
+import { GLOBAL_CONFIG_DIR } from "../config.js";
+
+const UPLOADS_DIR = join(GLOBAL_CONFIG_DIR, "uploads");
+const SESSIONS_ROOT = join(GLOBAL_CONFIG_DIR, "sessions");
+
+const EXTRA_ALLOWED_ORIGINS = new Set(
+  (process.env.BRIDGE_ALLOWED_ORIGINS || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+);
+
+function isLoopbackOrigin(origin: string): boolean {
+  try {
+    const u = new URL(origin);
+    return u.hostname === "127.0.0.1" || u.hostname === "localhost" || u.hostname === "[::1]";
+  } catch {
+    return false;
+  }
+}
+
+function isOriginAllowed(origin: string | undefined): boolean {
+  if (!origin) return true;
+  return isLoopbackOrigin(origin) || EXTRA_ALLOWED_ORIGINS.has(origin);
+}
+
+function isMediaPathAllowed(filePath: string, fleet: FleetManager): boolean {
+  const target = resolve(filePath);
+  const roots = [UPLOADS_DIR, SESSIONS_ROOT, ...fleet.listWorkspaces().map((w) => w.path)]
+    .map((p) => resolve(p));
+  return roots.some((root) => {
+    const rel = relative(root, target);
+    return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+  });
+}
+
+export type ReloadCallback = () => void;
+let _reloadCallback: ReloadCallback | null = null;
+export function setReloadCallback(cb: ReloadCallback): void { _reloadCallback = cb; }
+
+export type PromoteCallback = () => Promise<{ ok: boolean; error?: string }>;
+let _promoteCallback: PromoteCallback | null = null;
+export function setPromoteCallback(cb: PromoteCallback): void { _promoteCallback = cb; }
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkg = JSON.parse(readFileSync(join(__dirname, "../../package.json"), "utf-8"));
@@ -19,11 +62,24 @@ export function createHttpApp(
   const app = express();
   app.use(express.json());
 
-  app.use((_req, res, next) => {
-    res.header("Access-Control-Allow-Origin", "*");
-    res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+  app.use((req, res, next) => {
+    const origin = req.header("Origin");
+    const allowed = isOriginAllowed(origin);
+    if (origin && allowed) {
+      res.header("Access-Control-Allow-Origin", origin);
+      res.header("Vary", "Origin");
+      res.header("Access-Control-Allow-Credentials", "true");
+    }
+    res.header("Access-Control-Allow-Methods", "GET, POST, DELETE, PATCH, OPTIONS");
     res.header("Access-Control-Allow-Headers", "Content-Type, Authorization");
-    if (_req.method === "OPTIONS") { res.sendStatus(204); return; }
+    if (req.method === "OPTIONS") {
+      res.sendStatus(allowed ? 204 : 403);
+      return;
+    }
+    if (!allowed) {
+      res.status(403).json({ error: "Origin not allowed" });
+      return;
+    }
     next();
   });
 
@@ -259,6 +315,79 @@ export function createHttpApp(
     }
     fleet.setGoal(goal);
     res.json({ ok: true, goal });
+  });
+
+  app.get("/api/fleet/task-log", (req, res) => {
+    const limit = Math.min(parseInt(req.query.limit as string) || 50, 200);
+    const format = req.query.format as string;
+
+    if (format === "raw") {
+      const entries = fleet.getTaskLogEntries(limit);
+      res.json({ entries, count: entries.length });
+      return;
+    }
+
+    const tasks = fleet.getTaskLogRaw(limit);
+    const completed = tasks.filter((t) => t.status === "completed").length;
+    const failed = tasks.filter((t) => t.status === "failed").length;
+    const pending = tasks.filter((t) => t.status === "dispatched").length;
+    res.json({ tasks, stats: { completed, failed, pending, total: tasks.length } });
+  });
+
+  app.post("/api/upload", express.raw({ type: "*/*", limit: "20mb" }), (req, res) => {
+    const fileName = (req.query.name as string) || `upload-${Date.now()}`;
+    const sanitized = fileName.replace(/[^a-zA-Z0-9._-]/g, "_");
+    try {
+      mkdirSync(UPLOADS_DIR, { recursive: true });
+      const filePath = join(UPLOADS_DIR, sanitized);
+      fsWriteFileSync(filePath, req.body);
+      res.json({ path: filePath, name: sanitized });
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message });
+    }
+  });
+
+  app.get("/api/media", (req, res) => {
+    const filePath = req.query.path as string;
+    if (!filePath) {
+      res.status(400).json({ error: "path query parameter is required" });
+      return;
+    }
+    if (!isMediaPathAllowed(filePath, fleet)) {
+      res.status(403).json({ error: "path not allowed" });
+      return;
+    }
+    const resolved = resolve(filePath);
+    if (!existsSync(resolved)) {
+      res.status(404).json({ error: "file not found" });
+      return;
+    }
+    res.sendFile(resolved);
+  });
+
+  app.post("/reload", (_req, res) => {
+    if (!_reloadCallback) {
+      res.status(501).json({ error: "Hot-reload not available — server not started with reload support" });
+      return;
+    }
+    console.log(`[reload] triggered via POST /reload`);
+    res.json({ ok: true, message: "Reload initiated — new process starting" });
+    setTimeout(() => _reloadCallback!(), 100);
+  });
+
+  app.post("/promote", async (_req, res) => {
+    if (!_promoteCallback) {
+      res.status(501).json({ error: "Not in standby mode" });
+      return;
+    }
+    console.log(`[promote] triggered via POST /promote`);
+    try {
+      const result = await _promoteCallback();
+      if (result.ok) { res.json({ ok: true, message: "Promoted to live" }); }
+      else { res.status(500).json({ ok: false, error: result.error }); }
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e instanceof Error ? e.message : String(e) });
+    }
   });
 
   return app;

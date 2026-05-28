@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useFleetStore, sendMessage } from "../stores/fleet";
+import { useFleetStore, sendMessage, serverBase } from "../stores/fleet";
 import { STATUS_META, getAgentColor } from "../lib/constants";
 import { PixelThronglet } from "./PixelThronglet";
 import { generateThronglet, statusToMood } from "../lib/thronglet";
@@ -13,8 +13,10 @@ export function ChatBar() {
   const [text, setText] = useState("");
   const [selectorOpen, setSelectorOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const selectorRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!activeAgent && agents.length === 1) {
@@ -52,23 +54,58 @@ export function ChatBar() {
     return { resolved: target, finalBody: body };
   };
 
+  const uploadFile = async (file: File): Promise<string | null> => {
+    try {
+      const res = await fetch(`${serverBase.http}/api/upload?name=${encodeURIComponent(file.name)}`, {
+        method: "POST",
+        body: file,
+      });
+      const data = await res.json();
+      return data.path || null;
+    } catch (err) {
+      console.error("[chatbar] upload failed:", err);
+      return null;
+    }
+  };
+
   const handleSend = async () => {
     const trimmed = text.trim();
-    if (!trimmed || !activeAgent || sending) return;
+    if ((!trimmed && pendingFiles.length === 0) || !activeAgent || sending) return;
 
     setSending(true);
     setText("");
+    const filesToUpload = [...pendingFiles];
+    setPendingFiles([]);
 
-    const { resolved, finalBody } = resolveTarget(activeAgent, trimmed);
+    let finalBody = trimmed;
+
+    if (filesToUpload.length > 0) {
+      const uploadedPaths: string[] = [];
+      for (const file of filesToUpload) {
+        const path = await uploadFile(file);
+        if (path) uploadedPaths.push(path);
+      }
+      if (uploadedPaths.length > 0) {
+        const attachDesc = uploadedPaths.map((p) => `[Attachment: file, path=${p}]`).join("\n");
+        finalBody = finalBody ? `${finalBody}\n\n${attachDesc}` : attachDesc;
+      }
+    }
+
+    if (!finalBody) {
+      setSending(false);
+      return;
+    }
+
+    const { resolved, finalBody: routedBody } = resolveTarget(activeAgent, finalBody);
 
     if (resolved === "@all") {
       for (const a of agents) {
-        sendMessage(a.name, finalBody);
+        sendMessage(a.name, routedBody);
       }
     } else if (resolved === "dispatch" || resolved === "_dispatcher") {
       const dispatcher = agents.find((a) => a.name === "_dispatcher");
       if (dispatcher) {
-        sendMessage("_dispatcher", finalBody);
+        sendMessage("_dispatcher", routedBody);
       } else {
         console.warn("[chatbar] _dispatcher not found, message not sent");
         setText(trimmed);
@@ -76,7 +113,7 @@ export function ChatBar() {
         return;
       }
     } else {
-      sendMessage(resolved, finalBody);
+      sendMessage(resolved, routedBody);
     }
 
     setSending(false);
@@ -184,6 +221,28 @@ export function ChatBar() {
           disabled={!activeAgent}
         />
 
+        {/* Attach file */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          style={{ display: "none" }}
+          onChange={(e) => {
+            if (e.target.files) {
+              setPendingFiles((prev) => [...prev, ...Array.from(e.target.files!)]);
+            }
+            e.target.value = "";
+          }}
+        />
+        <button
+          className="chatbar-attach"
+          onClick={() => fileInputRef.current?.click()}
+          disabled={!activeAgent}
+          title="Attach file"
+        >
+          <Icon name="paperclip" size={14} />
+        </button>
+
         {/* Keyboard hint */}
         <div className="chatbar-hints">
           <kbd>⇧↵</kbd>
@@ -191,13 +250,23 @@ export function ChatBar() {
 
         {/* Send */}
         <button
-          className={"chatbar-send" + (text.trim() && activeAgent ? " ready" : "")}
+          className={"chatbar-send" + ((text.trim() || pendingFiles.length > 0) && activeAgent ? " ready" : "")}
           onClick={handleSend}
-          disabled={!text.trim() || !activeAgent || sending}
+          disabled={(!text.trim() && pendingFiles.length === 0) || !activeAgent || sending}
         >
           <Icon name="send" size={14} />
         </button>
       </div>
+      {pendingFiles.length > 0 && (
+        <div className="chatbar-pending-files">
+          {pendingFiles.map((f, i) => (
+            <span key={i} className="pending-file-chip">
+              📎 {f.name}
+              <button onClick={() => setPendingFiles((prev) => prev.filter((_, j) => j !== i))} className="pending-file-remove">×</button>
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

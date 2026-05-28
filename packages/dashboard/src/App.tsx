@@ -22,6 +22,25 @@ function useMobileBreakpoint(): boolean {
   );
 }
 
+function useVisualViewportResize() {
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const onResize = () => {
+      const offset = window.innerHeight - vv.height;
+      document.documentElement.style.setProperty("--kb-offset", `${offset}px`);
+    };
+    vv.addEventListener("resize", onResize);
+    vv.addEventListener("scroll", onResize);
+    onResize();
+    return () => {
+      vv.removeEventListener("resize", onResize);
+      vv.removeEventListener("scroll", onResize);
+      document.documentElement.style.removeProperty("--kb-offset");
+    };
+  }, []);
+}
+
 export function App() {
   const { connected, mode } = useFleetStore();
   const isMobile = useMobileBreakpoint();
@@ -31,6 +50,7 @@ export function App() {
   }, []);
 
   useKeyboard();
+  useVisualViewportResize();
 
   return (
     <>

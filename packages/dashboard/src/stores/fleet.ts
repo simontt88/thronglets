@@ -20,11 +20,20 @@ export interface AgentState {
   sessionName?: string;
 }
 
+export interface SessionMediaAttachment {
+  type: "photo" | "document" | "video" | "voice" | "animation";
+  url?: string;
+  fileName?: string;
+  mimeType?: string;
+  caption?: string;
+}
+
 export interface SessionEvent {
   ts: string;
   type: string;
   text?: string;
   error?: string;
+  attachments?: SessionMediaAttachment[];
 }
 
 export interface WorkspaceEntry {
@@ -269,7 +278,10 @@ export function connectWS() {
                 : a
             ),
           }));
-          appendSessionEvent(event.agentName, { ts: event.ts, type: "user_message", text: event.payload?.text });
+          appendSessionEvent(event.agentName, {
+            ts: event.ts, type: "user_message", text: event.payload?.text,
+            attachments: event.payload?.attachments,
+          });
           if (useFleetStore.getState().mode === "chill") {
             useFleetStore.getState().pushChillNotification(event.agentName, event.payload?.text?.slice(0, 80) || "received a message");
           }
@@ -282,7 +294,10 @@ export function connectWS() {
                 : a
             ),
           }));
-          appendSessionEvent(event.agentName, { ts: event.ts, type: "agent_message", text: event.payload?.text });
+          appendSessionEvent(event.agentName, {
+            ts: event.ts, type: "agent_message", text: event.payload?.text,
+            attachments: event.payload?.attachments,
+          });
           if (useFleetStore.getState().mode === "chill") {
             useFleetStore.getState().pushChillNotification(event.agentName, event.payload?.text?.slice(0, 80) || "sent a message");
           }

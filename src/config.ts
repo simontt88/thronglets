@@ -88,6 +88,20 @@ export const DEFAULT_DIGEST: DigestConfig = {
   silenceThresholdMs: 2 * 60 * 60 * 1000,
 };
 
+export interface ExternalConfig {
+  enabled: boolean;
+  defaultPreset: string;
+  sessionMaxAgeMs: number;
+  inviteExpiresHours: number;
+}
+
+export const DEFAULT_EXTERNAL: ExternalConfig = {
+  enabled: false,
+  defaultPreset: "readonly",
+  sessionMaxAgeMs: 5 * 60 * 1000,     // 5 min — external sessions close fast
+  inviteExpiresHours: 72,              // 3 days
+};
+
 export interface FleetConfig {
   comms: CommsMode;
   timeouts: FleetTimeouts;
@@ -99,6 +113,7 @@ export interface FleetConfig {
   idlePoke: IdlePokeConfig;
   digest: DigestConfig;
   notificationCooldownMs: number;
+  external: ExternalConfig;
 }
 
 export interface BridgeConfig {
@@ -323,6 +338,16 @@ export function loadConfig(): BridgeConfig {
         };
       })(),
       notificationCooldownMs: Number(rawFleet?.notification_cooldown_ms ?? rawFleet?.notificationCooldownMs ?? 30 * 60 * 1000),
+      external: (() => {
+        const raw = rawFleet?.external as Record<string, unknown> | undefined;
+        if (!raw) return DEFAULT_EXTERNAL;
+        return {
+          enabled: raw.enabled === true,
+          defaultPreset: (raw.default_preset ?? raw.defaultPreset ?? DEFAULT_EXTERNAL.defaultPreset) as string,
+          sessionMaxAgeMs: Number(raw.session_max_age_ms ?? raw.sessionMaxAgeMs ?? DEFAULT_EXTERNAL.sessionMaxAgeMs),
+          inviteExpiresHours: Number(raw.invite_expires_hours ?? raw.inviteExpiresHours ?? DEFAULT_EXTERNAL.inviteExpiresHours),
+        };
+      })(),
     },
 
     session: rawSession ? {

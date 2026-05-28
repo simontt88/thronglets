@@ -1,3 +1,21 @@
+export interface MediaAttachment {
+  type: "photo" | "document" | "video" | "voice" | "animation";
+  fileId: string;
+  fileName?: string;
+  mimeType?: string;
+  fileSize?: number;
+  caption?: string;
+  url?: string;
+  thumbnailUrl?: string;
+}
+
+export interface OutgoingMedia {
+  type: "photo" | "document";
+  source: string;
+  caption?: string;
+  fileName?: string;
+}
+
 export interface IncomingMessage {
   chatId: string;
   userId: string;
@@ -5,6 +23,7 @@ export interface IncomingMessage {
   username?: string;
   isCommand?: boolean;
   raw?: unknown;
+  attachments?: MediaAttachment[];
 }
 
 export interface TransportOptions {
@@ -20,5 +39,6 @@ export interface Transport {
   onMessage(handler: (msg: IncomingMessage) => Promise<void>): void;
 
   sendReply(chatId: string, text: string): Promise<void>;
+  sendMedia(chatId: string, media: OutgoingMedia): Promise<void>;
   sendTyping(chatId: string): Promise<void>;
 }

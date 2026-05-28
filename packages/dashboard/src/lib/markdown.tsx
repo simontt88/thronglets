@@ -109,6 +109,19 @@ function inlineFormat(text: string): React.ReactNode {
       continue;
     }
 
+    // Image ![alt](url)
+    const imgMatch = remaining.match(/^(.*?)!\[([^\]]*)\]\(([^)]+)\)(.*)$/);
+    if (imgMatch) {
+      if (imgMatch[1]) parts.push(<span key={key++}>{imgMatch[1]}</span>);
+      parts.push(
+        <span key={key++} className="md-img-wrap">
+          <img className="md-img" src={imgMatch[3]} alt={imgMatch[2]} loading="lazy" />
+        </span>
+      );
+      remaining = imgMatch[4];
+      continue;
+    }
+
     // Link [text](url)
     const linkMatch = remaining.match(/^(.*?)\[([^\]]+)\]\(([^)]+)\)(.*)$/);
     if (linkMatch) {

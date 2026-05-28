@@ -1,14 +1,16 @@
 import { appendFileSync, readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { EventEmitter } from "events";
-import type { AgentDef, BridgeConfig, RuntimeType, CommsMode, FleetTimeouts } from "../config.js";
-import { DEFAULT_TIMEOUTS } from "../config.js";
+import type { AgentDef, BridgeConfig, RuntimeType, CommsMode, FleetTimeouts, ExternalConfig } from "../config.js";
+import { DEFAULT_TIMEOUTS, DEFAULT_EXTERNAL } from "../config.js";
 import type { Runtime, AgentSession } from "../runtimes/interface.js";
-import { loadFleetState, saveFleetState, getSessionsDir, readRecentHistory, addWorkspace as addWorkspaceToState, removeWorkspace as removeWorkspaceFromState, renameWorkspace as renameWorkspaceInState, loadWorkspaces, recoverFromSessions } from "./state.js";
+import { loadFleetState, saveFleetState, getSessionsDir, readRecentHistory, addWorkspace as addWorkspaceToState, removeWorkspace as removeWorkspaceFromState, renameWorkspace as renameWorkspaceInState, loadWorkspaces, recoverFromSessions, appendTaskLog, generateTaskId, reconstructTaskLedger, readTaskLog } from "./state.js";
+import type { TaskLogEntry } from "./state.js";
 import { generateUniqueName } from "./naming.js";
-import { buildAgentPreamble, buildDispatcherPreamble } from "./preamble.js";
+import { buildAgentPreamble, buildDispatcherPreamble, buildExternalPreamble } from "./preamble.js";
 import { DISPATCHER_NAME } from "../utils/constants.js";
 import { HealthMonitor } from "./health-monitor.js";
+import type { ExternalPermissions } from "./chat-bindings.js";
 import type { AgentState, AgentStatus, FleetEvent, FleetEventType, FleetState, QueuedMessage, MessageSender, WorkspaceEntry, FleetActivityEvent, FleetActivityType } from "./types.js";
 export type { WorkspaceEntry } from "./types.js";
 
@@ -53,6 +55,17 @@ interface LiveAgent {
   processing: boolean;
 }
 
+interface ExternalSession {
+  runtime: Runtime;
+  session: AgentSession | null;
+  sessionId: string;
+  chatId: string;
+  agentName: string;
+  lastActivity: number;
+  processing: boolean;
+  messageQueue: QueuedMessage[];
+}
+
 export interface FleetManagerConfig {
   workspaces: WorkspaceEntry[];
   createRuntime: (agent: AgentDef) => Runtime;
@@ -60,28 +73,42 @@ export interface FleetManagerConfig {
   getAgentDef: (runtime: RuntimeType, model?: string) => AgentDef;
   commsMode: CommsMode;
   timeouts?: FleetTimeouts;
+  externalConfig?: ExternalConfig;
 }
 
+
+export interface OutgoingMediaItem {
+  type: "photo" | "document";
+  source: string;
+  caption?: string;
+  fileName?: string;
+  agentName: string;
+}
 
 export type ReplyRoutingCallback = (fromAgent: string, toAgent: string, reply: string) => void;
 export type PeerMessageCallback = (fromAgent: string, toAgent: string, direction: "sent" | "replied") => void;
 export type DispatcherBroadcastCallback = (reply: string, triggerAgent: string) => void;
 export type UserNotificationCallback = (text: string, level: string) => void;
 export type FleetActivityCallback = (event: FleetActivityEvent) => void;
+export type OutgoingMediaCallback = (media: OutgoingMediaItem) => void;
 
 export interface TaskRecord {
+  taskId: string;
   assignedAt: string;
   agent: string;
   task: string;
   status: "dispatched" | "completed" | "failed";
   completedAt?: string;
   result?: string;
+  durationMs?: number;
 }
 
 export class FleetManager {
   private agents = new Map<string, LiveAgent>();
+  private externalSessions = new Map<string, ExternalSession>();
   private bus: FleetEventBus;
   private config: FleetManagerConfig;
+  private externalConfig: ExternalConfig;
   private healthMonitor: HealthMonitor;
   private postReplyHook: ((agentName: string, reply: string, sender: MessageSender) => Promise<string>) | null = null;
   private replyRoutingCallback: ReplyRoutingCallback | null = null;
@@ -89,13 +116,16 @@ export class FleetManager {
   private dispatcherBroadcastCallback: DispatcherBroadcastCallback | null = null;
   private userNotificationCallback: UserNotificationCallback | null = null;
   private fleetActivityCallback: FleetActivityCallback | null = null;
+  private outgoingMediaCallback: OutgoingMediaCallback | null = null;
   private taskLedger: TaskRecord[] = [];
   private workingStartedAt = new Map<string, number>();
   private repliedToDispatcher = new Set<string>();
+  private recentFailures = new Map<string, number[]>(); // agent -> recent failure timestamps (retry-storm guard)
 
   constructor(bus: FleetEventBus, config: FleetManagerConfig) {
     this.bus = bus;
     this.config = config;
+    this.externalConfig = config.externalConfig || DEFAULT_EXTERNAL;
     this.healthMonitor = new HealthMonitor(
       bus,
       () => this.agents as Map<string, any>,
@@ -141,15 +171,27 @@ export class FleetManager {
     this.fleetActivityCallback?.({ type, agent, detail });
   }
 
+  onOutgoingMedia(callback: OutgoingMediaCallback): void {
+    this.outgoingMediaCallback = callback;
+  }
+
+  queueOutgoingMedia(agentName: string, media: { type: "photo" | "document"; source: string; caption?: string; fileName?: string }): void {
+    const item: OutgoingMediaItem = { ...media, agentName };
+    this.outgoingMediaCallback?.(item);
+  }
+
   getWorkingElapsed(name: string): number | null {
     const started = this.workingStartedAt.get(name);
     if (!started) return null;
     return Date.now() - started;
   }
 
-  recordTask(agent: string, task: string): void {
+  recordTask(agent: string, task: string): string {
+    const taskId = generateTaskId();
+    const now = new Date().toISOString();
     this.taskLedger.push({
-      assignedAt: new Date().toISOString(),
+      taskId,
+      assignedAt: now,
       agent,
       task: task.slice(0, 200),
       status: "dispatched",
@@ -157,35 +199,67 @@ export class FleetManager {
     if (this.taskLedger.length > 100) {
       this.taskLedger = this.taskLedger.slice(-50);
     }
+    appendTaskLog({ ts: now, event: "dispatched", taskId, agent, task: task.slice(0, 200), from: DISPATCHER_NAME });
+    return taskId;
   }
 
   completeTask(agent: string, status: "completed" | "failed", result?: string): void {
     for (let i = this.taskLedger.length - 1; i >= 0; i--) {
-      if (this.taskLedger[i].agent === agent && this.taskLedger[i].status === "dispatched") {
-        this.taskLedger[i].status = status;
-        this.taskLedger[i].completedAt = new Date().toISOString();
-        if (result) this.taskLedger[i].result = result.slice(0, 100);
+      const rec = this.taskLedger[i];
+      if (rec.agent === agent && rec.status === "dispatched") {
+        const now = new Date().toISOString();
+        rec.status = status;
+        rec.completedAt = now;
+        if (result) rec.result = result.slice(0, 100);
+        rec.durationMs = new Date(now).getTime() - new Date(rec.assignedAt).getTime();
+        appendTaskLog({
+          ts: now, event: status, taskId: rec.taskId, agent,
+          durationMs: rec.durationMs, result: result?.slice(0, 100),
+        });
         break;
       }
     }
   }
 
   getRecentTaskLog(limit = 20): string {
-    const recent = this.taskLedger.slice(-limit);
-    if (recent.length === 0) return "No tasks recorded yet.";
+    let recent = this.taskLedger.slice(-limit);
+
+    if (recent.length === 0) {
+      const fromDisk = reconstructTaskLedger(limit);
+      if (fromDisk.length === 0) return "No tasks recorded yet.";
+      recent = fromDisk;
+    }
 
     const completed = recent.filter((t) => t.status === "completed").length;
     const failed = recent.filter((t) => t.status === "failed").length;
     const pending = recent.filter((t) => t.status === "dispatched").length;
     const header = `Tasks: ${completed} completed, ${failed} failed, ${pending} pending`;
 
+    const formatDuration = (ms?: number): string => {
+      if (!ms) return "";
+      if (ms < 60_000) return ` (${Math.round(ms / 1000)}s)`;
+      return ` (${Math.round(ms / 60_000)}m)`;
+    };
+
     const lines = recent.map((t) => {
       const status = t.status === "completed" ? "✓" : t.status === "failed" ? "✗" : "…";
       const result = t.result ? ` → ${t.result}` : "";
-      return `  ${status} ${t.agent}: ${t.task.slice(0, 80)}${result}`;
+      const dur = formatDuration(t.durationMs);
+      return `  ${status} ${t.agent}: ${t.task.slice(0, 80)}${dur}${result}`;
     });
 
     return `${header}\n${lines.join("\n")}`;
+  }
+
+  getTaskLogRaw(limit = 50): TaskRecord[] {
+    if (this.taskLedger.length > 0) {
+      return this.taskLedger.slice(-limit);
+    }
+    return reconstructTaskLedger(limit);
+  }
+
+  getTaskLogEntries(limit = 50): TaskLogEntry[] {
+    return readTaskLog(limit);
   }
 
   getTaskLedgerSummary(): string {
@@ -211,6 +285,25 @@ export class FleetManager {
 
   stopHealthCheck(): void {
     this.healthMonitor.stop();
+  }
+
+  async gracefulShutdown(): Promise<void> {
+    console.log(`[fleet] graceful shutdown — persisting state and closing sessions...`);
+    this.healthMonitor.stop();
+    this.persistState();
+
+    for (const [name, live] of this.agents) {
+      if (live.session) {
+        try {
+          await live.session.close();
+          console.log(`[fleet] closed session for "${name}"`);
+        } catch (err) {
+          console.warn(`[fleet] failed to close session for "${name}": ${(err as Error).message}`);
+        }
+      }
+    }
+    this.persistState();
+    console.log(`[fleet] shutdown complete — ${this.agents.size} agents persisted`);
   }
 
   get eventBus(): FleetEventBus {
@@ -669,8 +762,14 @@ export class FleetManager {
 
       // Forward non-timeout errors to dispatcher (timeouts are retried silently by the platform)
       if (name !== DISPATCHER_NAME && !isTimeout) {
+        const nowTs = Date.now();
+        const fails = (this.recentFailures.get(name) || []).filter((t) => nowTs - t < 5 * 60 * 1000);
+        fails.push(nowTs);
+        this.recentFailures.set(name, fails);
         const dispLive = this.agents.get(DISPATCHER_NAME);
-        if (dispLive && dispLive.state.status !== "error" && dispLive.state.status !== "dead") {
+        if (fails.length > 2) {
+          console.warn(`[fleet] ${name}: ${fails.length} failures in 5min — suppressing dispatcher notification (retry-storm guard)`);
+        } else if (dispLive && dispLive.state.status !== "error" && dispLive.state.status !== "dead") {
           const briefErr = errMsg.length > 200 ? errMsg.slice(0, 200) + "…" : errMsg;
           this.send(DISPATCHER_NAME, `Agent "${name}" hit an error: ${briefErr}\nStatus: ${live.state.status}. It will auto-recover when you send it another message — just re-send the task. Do NOT kill or re-hatch.`, name)
             .catch((e) => console.warn(`[fleet] failed to notify dispatcher of ${name} error: ${(e as Error).message?.slice(0, 60)}`));
@@ -907,7 +1006,169 @@ export class FleetManager {
     return result;
   }
 
+  private externalSessionKey(agentName: string, chatId: string): string {
+    return `${agentName}:${chatId}`;
+  }
+
+  async sendExternal(
+    agentName: string,
+    chatId: string,
+    text: string,
+    permissions: ExternalPermissions,
+    username?: string,
+  ): Promise<string> {
+    const live = this.agents.get(agentName);
+    if (!live) {
+      return `Agent "${agentName}" is not available right now.`;
+    }
+
+    const key = this.externalSessionKey(agentName, chatId);
+    let extSession = this.externalSessions.get(key);
+
+    if (extSession && extSession.processing) {
+      return new Promise((resolve, reject) => {
+        extSession!.messageQueue.push({ text, sender: `ext:${chatId}`, resolve, reject });
+        console.log(`[fleet] ${agentName}: queued external message from ${chatId} (queue: ${extSession!.messageQueue.length})`);
+      });
+    }
+
+    if (!extSession) {
+      const agentDef = this.config.getAgentDef(live.state.runtime as RuntimeType, live.state.model);
+      const runtime = this.config.createRuntime(agentDef);
+      const sessionId = `ext-${chatId}-${this.generateSessionId()}`;
+
+      extSession = {
+        runtime,
+        session: null,
+        sessionId,
+        chatId,
+        agentName,
+        lastActivity: Date.now(),
+        processing: false,
+        messageQueue: [],
+      };
+      this.externalSessions.set(key, extSession);
+    }
+
+    // Check staleness — external sessions have shorter timeout
+    const idleMs = Date.now() - extSession.lastActivity;
+    if (extSession.session && idleMs > this.externalConfig.sessionMaxAgeMs) {
+      console.log(`[fleet] ${agentName}: external session for ${chatId} idle ${Math.round(idleMs / 60_000)}min — closing`);
+      try { extSession.session.close(); } catch {}
+      extSession.session = null;
+    }
+
+    return this.processExternalMessage(agentName, extSession, text, permissions, username);
+  }
+
+  private async processExternalMessage(
+    agentName: string,
+    ext: ExternalSession,
+    text: string,
+    permissions: ExternalPermissions,
+    username?: string,
+  ): Promise<string> {
+    const live = this.agents.get(agentName);
+    if (!live) return `Agent "${agentName}" is not available.`;
+
+    ext.processing = true;
+    ext.lastActivity = Date.now();
+
+    this.logToSession(agentName, ext.sessionId, {
+      type: "external_message",
+      chatId: ext.chatId,
+      username,
+      text,
+    });
+
+    try {
+      const isNewSession = !ext.session;
+      if (isNewSession) {
+        const agentDef = this.config.getAgentDef(live.state.runtime as RuntimeType, live.state.model);
+        if (!ext.runtime) {
+          ext.runtime = this.config.createRuntime(agentDef);
+        }
+        ext.session = await this.withTimeout(
+          ext.runtime.createSession({
+            cwd: live.state.workspacePath,
+            model: live.state.model,
+            name: `ext-${agentName}-${ext.chatId.slice(-6)}`,
+          }),
+          60_000,
+          `${agentName} external session creation`,
+        );
+      }
+
+      const preamble = isNewSession
+        ? buildExternalPreamble(agentName, live.state, permissions, username)
+        : "";
+      const finalText = preamble ? `${preamble}\n\n---\n\n${text}` : text;
+
+      let reply = await this.withTimeout(
+        ext.session!.send(finalText),
+        this.timeouts.sendTimeoutMs,
+        `${agentName} external send`,
+      );
+
+      // Strip any fleet markers from external replies — external sessions must not execute fleet tools
+      reply = reply.replace(/\[FLEET:\w+:\{[\s\S]*?\}\]/g, "").trim();
+
+      this.logToSession(agentName, ext.sessionId, {
+        type: "external_reply",
+        chatId: ext.chatId,
+        text: reply,
+      });
+
+      return reply;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.error(`[fleet] ${agentName}: external session error for ${ext.chatId}: ${errMsg.slice(0, 100)}`);
+
+      if (ext.session) {
+        try { ext.session.close(); } catch {}
+        ext.session = null;
+      }
+
+      this.logToSession(agentName, ext.sessionId, {
+        type: "external_error",
+        chatId: ext.chatId,
+        error: errMsg,
+      });
+
+      return `Sorry, I encountered an error. Please try again in a moment.`;
+    } finally {
+      ext.processing = false;
+      if (ext.messageQueue.length > 0) {
+        const next = ext.messageQueue.shift()!;
+        this.processExternalMessage(agentName, ext, next.text, permissions, username)
+          .then(next.resolve)
+          .catch(next.reject);
+      }
+    }
+  }
+
+  cleanupExternalSessions(): void {
+    const maxAge = this.externalConfig.sessionMaxAgeMs;
+    const now = Date.now();
+    for (const [key, ext] of this.externalSessions) {
+      if (now - ext.lastActivity > maxAge && !ext.processing) {
+        if (ext.session) {
+          try { ext.session.close(); } catch {}
+        }
+        this.externalSessions.delete(key);
+        console.log(`[fleet] cleaned up external session ${key}`);
+      }
+    }
+  }
+
   async restore(): Promise<void> {
+    // Restore task ledger from persistent JSONL
+    const diskLedger = reconstructTaskLedger(50);
+    if (diskLedger.length > 0) {
+      this.taskLedger = diskLedger;
+      console.log(`[fleet] restored ${diskLedger.length} task records from task-log.jsonl`);
+    }
+
     let saved = loadFleetState();
 
     // If state is empty, attempt recovery from session directories
