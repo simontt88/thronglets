@@ -81,7 +81,9 @@ export type FleetActivityType =
   | "agent_waking"
   | "agent_completed"
   | "agent_died"
-  | "agent_timeout";
+  | "agent_timeout"
+  | "tool_block_parse_error"
+  | "narrate_without_emit";
 
 export interface FleetActivityEvent {
   type: FleetActivityType;

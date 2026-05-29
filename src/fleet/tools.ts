@@ -3,7 +3,60 @@ import type { MessageSender, WorkspaceEntry } from "./types.js";
 import type { CommsMode } from "../config.js";
 import { DISPATCHER_NAME } from "../utils/constants.js";
 
-const FLEET_MARKER_REGEX = /\[FLEET:(\w+):(\{[\s\S]*?\})\]/g;
+const TOOL_CALLS_BLOCK_REGEX = /<TOOL_CALLS>\s*([\s\S]*?)\s*<\/TOOL_CALLS>/g;
+const LEGACY_FLEET_MARKER_REGEX = /\[FLEET:(\w+):(\{[\s\S]*?\})\]/g;
+const DISPATCH_CLAIM_REGEX = /(派给|派发|分配给|让\s*@?[\w一-龥]+\s*(?:写|做|实现|执行|完成|去|来|准备|继续|开始|处理|跟进)|let\s+@?\w+\s+(?:write|do|implement|handle|continue|start)|assigned to @?\w+|dispatched to @?\w+|hand(?:ed|ing) off to @?\w+)/i;
+
+interface ParsedToolCall {
+  tool: string;
+  args: Record<string, unknown>;
+}
+
+interface ParsedReply {
+  narrative: string;
+  structuredCalls: ParsedToolCall[];
+  legacyCalls: ParsedToolCall[];
+  blockParseError?: string;
+}
+
+export function parseReplyToolCalls(reply: string): ParsedReply {
+  const result: ParsedReply = { narrative: reply, structuredCalls: [], legacyCalls: [] };
+
+  for (const m of reply.matchAll(TOOL_CALLS_BLOCK_REGEX)) {
+    const raw = m[1].trim();
+    if (!raw) continue;
+    try {
+      const arr = JSON.parse(raw);
+      if (!Array.isArray(arr)) throw new Error("TOOL_CALLS block must be a JSON array");
+      for (const entry of arr) {
+        if (!entry || typeof entry !== "object" || typeof (entry as { tool?: unknown }).tool !== "string") {
+          throw new Error(`invalid tool call entry: ${JSON.stringify(entry).slice(0, 80)}`);
+        }
+        const e = entry as { tool: string; args?: Record<string, unknown> };
+        result.structuredCalls.push({ tool: e.tool, args: e.args ?? {} });
+      }
+    } catch (err) {
+      result.blockParseError = err instanceof Error ? err.message : String(err);
+    }
+  }
+  result.narrative = result.narrative.replace(TOOL_CALLS_BLOCK_REGEX, "").trim();
+
+  for (const m of result.narrative.matchAll(LEGACY_FLEET_MARKER_REGEX)) {
+    try {
+      const args = JSON.parse(m[2]);
+      result.legacyCalls.push({ tool: m[1], args });
+    } catch {
+      // malformed legacy marker — skip silently (the parse-error path is for the structured block)
+    }
+  }
+  result.narrative = result.narrative.replace(LEGACY_FLEET_MARKER_REGEX, "").trim();
+
+  return result;
+}
+
+export function detectDispatchClaim(narrative: string): boolean {
+  return DISPATCH_CLAIM_REGEX.test(narrative);
+}
 
 type ToolPermission = "dispatcher" | "all";
 
@@ -187,121 +240,127 @@ export function createPostReplyHook(
   commsMode: CommsMode,
 ) {
   return async (agentName: string, reply: string, _sender: MessageSender): Promise<string> => {
-    const matches = [...reply.matchAll(FLEET_MARKER_REGEX)];
-    if (matches.length === 0) return reply;
-
+    const parsed = parseReplyToolCalls(reply);
     const isDispatcher = agentName === DISPATCHER_NAME;
-    const results: string[] = [];
 
-    for (const match of matches) {
-      const [_fullMatch, action, argsJson] = match;
-      const tool = TOOLS[action];
+    if (parsed.blockParseError) {
+      console.warn(`[fleet-tools] ${agentName}: <TOOL_CALLS> block malformed — ${parsed.blockParseError}`);
+      fleet.emitFleetActivity("tool_block_parse_error", agentName, { error: parsed.blockParseError });
+    }
 
+    const allCalls = [...parsed.structuredCalls, ...parsed.legacyCalls];
+    if (allCalls.length === 0 && !parsed.blockParseError) {
+      // No tool calls at all — fast path. Still run dispatch-claim self-check below.
+    }
+
+    for (const call of allCalls) {
+      const tool = TOOLS[call.tool];
       if (!tool) {
-        results.push(`[FLEET-RESULT:${action}:unknown tool]`);
+        console.log(`[fleet-tools] ${agentName} called unknown tool: ${call.tool}`);
         continue;
       }
-
       if (tool.permission === "dispatcher" && !isDispatcher) {
-        results.push(`[FLEET-RESULT:${action}:permission denied — only dispatcher can use ${action}]`);
-        console.log(`[fleet-tools] ${agentName} tried ${action} but lacks permission`);
+        console.log(`[fleet-tools] ${agentName} tried ${call.tool} but lacks permission`);
         continue;
       }
-
       try {
-        const args = JSON.parse(argsJson);
-        const result = await tool.execute(args, agentName, fleet, workspaces, commsMode);
-        results.push(`[FLEET-RESULT:${action}:${result}]`);
-        console.log(`[fleet-tools] ${agentName} called ${action}: ${result.slice(0, 80)}`);
+        const result = await tool.execute(call.args, agentName, fleet, workspaces, commsMode);
+        console.log(`[fleet-tools] ${agentName} called ${call.tool}: ${result.slice(0, 80)}`);
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        results.push(`[FLEET-RESULT:${action}:error — ${errMsg.slice(0, 80)}]`);
-        console.warn(`[fleet-tools] ${agentName} ${action} FAILED: ${errMsg.slice(0, 120)} | args: ${argsJson.slice(0, 100)}`);
+        console.warn(`[fleet-tools] ${agentName} ${call.tool} FAILED: ${errMsg.slice(0, 120)}`);
       }
     }
 
-    const cleanReply = reply.replace(FLEET_MARKER_REGEX, "").trim();
-    if (results.length > 0) {
-      console.log(`[fleet-tools] ${agentName}: ${results.length} tool call(s) executed`);
+    if (allCalls.length > 0) {
+      console.log(`[fleet-tools] ${agentName}: ${allCalls.length} tool call(s) (${parsed.structuredCalls.length} structured, ${parsed.legacyCalls.length} legacy)`);
     }
 
-    return cleanReply;
+    // Self-validation: narrate-but-not-emit
+    const claimedDispatch = detectDispatchClaim(parsed.narrative);
+    const emittedDispatch = allCalls.some((c) => c.tool === "fleet_send" || c.tool === "fleet_spawn");
+    if (claimedDispatch && !emittedDispatch) {
+      console.warn(`[fleet-tools] ${agentName}: NARRATE-WITHOUT-EMIT — claimed dispatch in narrative but emitted no fleet_send/fleet_spawn`);
+      fleet.emitFleetActivity("narrate_without_emit", agentName, {
+        narrative_excerpt: parsed.narrative.slice(0, 240),
+      });
+    }
+
+    return parsed.narrative;
   };
 }
 
+const STRUCTURED_PROTOCOL = `
+## Fleet tools — structured emission protocol
+
+When you want to take an action (send a message to another agent, set the fleet goal, notify the user, etc.), emit it as a **trailing JSON block** at the END of your reply:
+
+\`\`\`
+<your narrative reply to the user/dispatcher — free text, markdown, anything>
+
+<TOOL_CALLS>
+[
+  { "tool": "fleet_send", "args": { "agent": "Hivka", "text": "Please draft the positioning doc" } }
+]
+</TOOL_CALLS>
+\`\`\`
+
+Hard rules:
+- The block MUST be at the END of your reply (after all narrative).
+- The block MUST be a valid JSON array. Each entry: { "tool": "<name>", "args": { ... } }.
+- Use ONE block per reply. Multiple tool calls go inside the same array.
+- If you have nothing to dispatch, omit the block entirely.
+- **NEVER narrate "I sent X to Y" / "让 @X 处理" without actually emitting a fleet_send tool call** — the bridge logs a NARRATE-WITHOUT-EMIT warning when it detects this and the dispatch did not happen.`;
+
+function toolListBlock(tools: Array<[string, string]>): string {
+  return "Available tools:\n" + tools.map(([n, sig]) => `- \`${n}\`  ${sig}`).join("\n");
+}
+
 export function getToolInstructions(isDispatcher: boolean, commsMode: CommsMode = "hive"): string {
+  let toolList: string;
+  let mode: string;
+
   if (isDispatcher) {
-    return `
-## Fleet Tools (you are the dispatcher — full control)
-
-You can execute fleet operations by including markers in your reply:
-
-- Send message to agent: [FLEET:fleet_send:{"agent":"name","text":"message"}]
-- Send with file paths: [FLEET:fleet_send:{"agent":"name","text":"message","files":["/abs/path/file.ts"]}]
-- Spawn new agent: [FLEET:fleet_spawn:{"runtime":"cursor","workspace":"alias"}]  (name is auto-assigned — do NOT pick a name)
-- Kill agent: [FLEET:fleet_kill:{"name":"agentname"}]
-- Clear agent session: [FLEET:fleet_clear:{"name":"agentname"}]
-- Get fleet status: [FLEET:fleet_status:{}]
-- Add workspace: [FLEET:fleet_workspace_add:{"alias":"short-name","path":"/absolute/path"}]
-- List workspaces: [FLEET:fleet_workspace_list:{}]
-- Set agent title: [FLEET:fleet_set_title:{"name":"agentname","title":"QA master"}]
-- Set fleet goal: [FLEET:fleet_set_goal:{"goal":"Build and test the auth module"}]
-- Send media to user: [FLEET:fleet_send_media:{"type":"photo","path":"/abs/path/image.png","caption":"optional caption"}]
-  Types: "photo" (images), "document" (files). Path must be an absolute filesystem path.
-- Notify user on Telegram: [FLEET:fleet_notify_user:{"text":"message","level":"info"}]
-  Use this to escalate something to the user. Your replies to system messages are silent by default.
-  Levels: "critical" (always delivered), "info" (throttled, for progress updates)
-- View task log: [FLEET:fleet_task_log:{"limit":20}]
-  See recent task dispatches and their outcomes (completed/failed/pending).
-
-You can include multiple markers in one reply. Results are logged to your session.
-Include the marker anywhere in your reply text — it will be stripped before showing to the user.
-`;
+    mode = "dispatcher mode — full control";
+    toolList = toolListBlock([
+      ["fleet_send",          `{ "agent": string, "text": string, "files"?: string[] } — send a message to another agent`],
+      ["fleet_spawn",         `{ "runtime": "cursor", "workspace": string }  — hatch a new agent (name auto-assigned, do NOT pick one)`],
+      ["fleet_kill",          `{ "name": string }                            — kill an agent (avoid; prefer fleet_clear)`],
+      ["fleet_clear",         `{ "name": string }                            — reset an agent's session (preserves identity)`],
+      ["fleet_status",        `{}                                            — get fleet status`],
+      ["fleet_workspace_add", `{ "alias": string, "path": string }           — register a workspace`],
+      ["fleet_workspace_list",`{}`],
+      ["fleet_set_title",     `{ "name": string, "title": string }           — set a throng's role label`],
+      ["fleet_set_goal",      `{ "goal": string }                            — set the fleet's standing goal`],
+      ["fleet_send_media",    `{ "type": "photo"|"document", "path": string, "caption"?: string }  — share an image/file with the user`],
+      ["fleet_notify_user",   `{ "text": string, "level": "info"|"critical" } — push a visible message to the user (your replies to system messages are silent by default)`],
+      ["fleet_task_log",      `{ "limit"?: number }                          — review recent task outcomes before dispatching`],
+    ]);
+  } else if (commsMode === "leash") {
+    mode = "leash mode — status only, no agent-to-agent comms";
+    toolList = toolListBlock([
+      ["fleet_status", `{}`],
+    ]);
+  } else if (commsMode === "hive") {
+    mode = "hive mode — only the dispatcher is a valid send target";
+    toolList = toolListBlock([
+      ["fleet_send",       `{ "agent": "_dispatcher", "text": string, "files"?: string[] }  — only "_dispatcher" is valid`],
+      ["fleet_status",     `{}`],
+      ["fleet_send_media", `{ "type": "photo"|"document", "path": string, "caption"?: string }`],
+    ]);
+  } else {
+    mode = "swarm mode — send messages to any agent";
+    toolList = toolListBlock([
+      ["fleet_send",       `{ "agent": string, "text": string, "files"?: string[] }`],
+      ["fleet_status",     `{}`],
+      ["fleet_send_media", `{ "type": "photo"|"document", "path": string, "caption"?: string }`],
+    ]);
   }
 
-  if (commsMode === "leash") {
-    return `
-## Fleet Tools (leash mode — status only)
+  return `${STRUCTURED_PROTOCOL}
 
-You can check fleet status but CANNOT send messages to other agents.
-All communication goes through the human. Focus on your assigned task.
+### ${mode}
 
-- Get fleet status: [FLEET:fleet_status:{}]
-`;
-  }
-
-  if (commsMode === "hive") {
-    return `
-## Fleet Tools (hive mode — dispatcher comms only)
-
-You can communicate with the dispatcher only (not other agents directly):
-
-- Send message to dispatcher: [FLEET:fleet_send:{"agent":"_dispatcher","text":"message"}]
-- Send with file paths: [FLEET:fleet_send:{"agent":"_dispatcher","text":"message","files":["/abs/path/file.ts"]}]
-- Get fleet status: [FLEET:fleet_status:{}]
-- Send media to user: [FLEET:fleet_send_media:{"type":"photo","path":"/abs/path/image.png","caption":"optional caption"}]
-  Types: "photo" (images), "document" (files). Path must be an absolute filesystem path.
-
-When reporting task completion, include any file paths the dispatcher might forward to other throngs.
-You CANNOT send messages to other agents — route through the dispatcher.
-Include the marker anywhere in your reply text — it will be stripped before showing to the user.
-`;
-  }
-
-  return `
-## Fleet Tools (swarm mode — send messages to any agent)
-
-You can communicate with other agents by including markers in your reply:
-
-- Send message to another agent: [FLEET:fleet_send:{"agent":"name","text":"message"}]
-- Send with file paths: [FLEET:fleet_send:{"agent":"name","text":"message","files":["/abs/path/file.ts"]}]
-- Get fleet status: [FLEET:fleet_status:{}]
-- Send media to user: [FLEET:fleet_send_media:{"type":"photo","path":"/abs/path/image.png","caption":"optional caption"}]
-  Types: "photo" (images), "document" (files). Path must be an absolute filesystem path.
-
-Use the "files" field to share file paths when collaborating across workspaces.
-The message will be queued and the other agent will see it tagged with your name.
-You CANNOT spawn, kill, or clear other agents — only the dispatcher can.
-Include the marker anywhere in your reply text — it will be stripped before showing to the user.
+${toolList}
 `;
 }

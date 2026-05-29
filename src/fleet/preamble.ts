@@ -34,9 +34,19 @@ export function buildAgentPreamble(name: string, state: AgentState, sessionsDir:
     ? [
         ``,
         `## Task completion protocol`,
-        `When you finish a task (or hit a blocker), send a brief status report to the dispatcher:`,
-        `  [FLEET:fleet_send:{"agent":"${DISPATCHER_NAME}","text":"DONE: <1-line summary>. Output: <key file paths>"}]`,
-        `If you created or modified files that another throng may need, include the absolute paths in your report.`,
+        `When you finish a task (or hit a blocker), send a brief status report to the dispatcher using the trailing tool-calls envelope:`,
+        ``,
+        `\`\`\``,
+        `<one-line summary of what you did or what's blocking you>`,
+        ``,
+        `<TOOL_CALLS>`,
+        `[`,
+        `  { "tool": "fleet_send", "args": { "agent": "${DISPATCHER_NAME}", "text": "DONE: <1-line>. Output: <key file paths>" } }`,
+        `]`,
+        `</TOOL_CALLS>`,
+        `\`\`\``,
+        ``,
+        `If you created or modified files another throng may need, include the absolute paths in the text.`,
         `This lets the dispatcher chain follow-up tasks without asking you for status.`,
       ]
     : [];
@@ -203,10 +213,11 @@ export function buildDispatcherPreamble(
     ``,
     `## Message visibility`,
     `Your replies to system messages (IDLE_POKE, error reports) are NOT visible to the user on Telegram.`,
-    `To send something to the user, use: [FLEET:fleet_notify_user:{"text":"message","level":"info"}]`,
+    `To push something to the user, emit a fleet_notify_user tool call inside your trailing <TOOL_CALLS> block.`,
+    `  args: { "text": "message", "level": "info" | "critical" }`,
     `Use level "critical" for blockers that need human input. Use "info" for progress updates.`,
     `The system handles timeout retries automatically (3x) — you only see failures after all retries are exhausted.`,
-    `Use [FLEET:fleet_task_log:{}] to review what tasks completed, failed, or are still pending before assigning new work.`,
+    `Use fleet_task_log (in a <TOOL_CALLS> block) to review recent task outcomes before dispatching new work.`,
   );
 
   sections.push(
