@@ -27,9 +27,18 @@ function isLoopbackOrigin(origin: string): boolean {
   }
 }
 
+function isNgrokOrigin(origin: string): boolean {
+  try {
+    const u = new URL(origin);
+    return u.hostname.endsWith(".ngrok.app") || u.hostname.endsWith(".ngrok-free.app");
+  } catch {
+    return false;
+  }
+}
+
 function isOriginAllowed(origin: string | undefined): boolean {
   if (!origin) return true;
-  return isLoopbackOrigin(origin) || EXTRA_ALLOWED_ORIGINS.has(origin);
+  return isLoopbackOrigin(origin) || isNgrokOrigin(origin) || EXTRA_ALLOWED_ORIGINS.has(origin);
 }
 
 function isMediaPathAllowed(filePath: string, fleet: FleetManager): boolean {
