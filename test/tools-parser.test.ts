@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { parseReplyToolCalls, detectDispatchClaim } from "../src/fleet/tools.js";
+import { describe, it, expect, vi } from "vitest";
+import { parseReplyToolCalls, detectDispatchClaim, createPostReplyHook } from "../src/fleet/tools.js";
 
 describe("parseReplyToolCalls — structured TOOL_CALLS block", () => {
   it("extracts a single tool call and strips the block from narrative", () => {
@@ -103,5 +103,60 @@ describe("detectDispatchClaim — narrate-without-emit guard", () => {
     expect(detectDispatchClaim("Let me check the state first.")).toBe(false);
     expect(detectDispatchClaim("当前舰队全部 sleeping，没有任务在跑。")).toBe(false);
     expect(detectDispatchClaim("好的，已收到。")).toBe(false);
+  });
+});
+
+describe("createPostReplyHook — re-prompt signaling", () => {
+  function makeMockFleet() {
+    return {
+      hasAgent: () => true,
+      send: vi.fn().mockResolvedValue("ok"),
+      emitFleetActivity: vi.fn(),
+    } as any;
+  }
+
+  it("returns reprompt when narrate-without-emit detected (dispatcher)", async () => {
+    const fleet = makeMockFleet();
+    const hook = createPostReplyHook(fleet, [], "hive");
+    const result = await hook("_dispatcher", "好，让 @Hivka 写一份完整方案。写好了我贴给你。", "user");
+    expect(result.reprompt).toBeDefined();
+    expect(result.reprompt).toContain("CORRECTION REQUIRED");
+    expect(result.narrative).toContain("Hivka");
+    expect(fleet.emitFleetActivity).toHaveBeenCalledWith("narrate_without_emit", "_dispatcher", expect.any(Object));
+  });
+
+  it("returns reprompt on TOOL_CALLS parse error", async () => {
+    const fleet = makeMockFleet();
+    const hook = createPostReplyHook(fleet, [], "hive");
+    const reply = `Sending now.\n<TOOL_CALLS>\n[{ "tool": "fleet_send", "args": { broken\n</TOOL_CALLS>`;
+    const result = await hook("_dispatcher", reply, "user");
+    expect(result.reprompt).toBeDefined();
+    expect(result.reprompt).toContain("invalid JSON");
+    expect(fleet.emitFleetActivity).toHaveBeenCalledWith("tool_block_parse_error", "_dispatcher", expect.any(Object));
+  });
+
+  it("returns no reprompt when tool call properly emitted", async () => {
+    const fleet = makeMockFleet();
+    const hook = createPostReplyHook(fleet, [], "hive");
+    const reply = `让 Hivka 写方案。\n<TOOL_CALLS>\n[{ "tool": "fleet_send", "args": { "agent": "Hivka", "text": "write the doc" } }]\n</TOOL_CALLS>`;
+    const result = await hook("_dispatcher", reply, "user");
+    expect(result.reprompt).toBeUndefined();
+    expect(result.narrative).toContain("Hivka");
+  });
+
+  it("returns no reprompt for plain replies without dispatch claims", async () => {
+    const fleet = makeMockFleet();
+    const hook = createPostReplyHook(fleet, [], "hive");
+    const result = await hook("_dispatcher", "收到，让我看看目前的状态。", "user");
+    expect(result.reprompt).toBeUndefined();
+  });
+
+  it("returns no reprompt when correction reply has valid tool calls (second pass)", async () => {
+    const fleet = makeMockFleet();
+    const hook = createPostReplyHook(fleet, [], "hive");
+    const correctionReply = `<TOOL_CALLS>\n[{ "tool": "fleet_send", "args": { "agent": "Hivka", "text": "write the doc" } }]\n</TOOL_CALLS>`;
+    const result = await hook("_dispatcher", correctionReply, "user");
+    expect(result.reprompt).toBeUndefined();
+    expect(result.narrative).toBe("");
   });
 });

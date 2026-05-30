@@ -110,7 +110,7 @@ export class FleetManager {
   private config: FleetManagerConfig;
   private externalConfig: ExternalConfig;
   private healthMonitor: HealthMonitor;
-  private postReplyHook: ((agentName: string, reply: string, sender: MessageSender) => Promise<string>) | null = null;
+  private postReplyHook: ((agentName: string, reply: string, sender: MessageSender) => Promise<import("./tools.js").PostReplyHookResult>) | null = null;
   private replyRoutingCallback: ReplyRoutingCallback | null = null;
   private peerMessageCallback: PeerMessageCallback | null = null;
   private dispatcherBroadcastCallback: DispatcherBroadcastCallback | null = null;
@@ -139,7 +139,7 @@ export class FleetManager {
     return this.healthMonitor.timeouts;
   }
 
-  setPostReplyHook(hook: (agentName: string, reply: string, sender: MessageSender) => Promise<string>): void {
+  setPostReplyHook(hook: (agentName: string, reply: string, sender: MessageSender) => Promise<import("./tools.js").PostReplyHookResult>): void {
     this.postReplyHook = hook;
   }
 
@@ -678,9 +678,37 @@ export class FleetManager {
         throw lastErr;
       }
 
-      // Run post-reply hook (fleet tool execution)
+      // Run post-reply hook (fleet tool execution) with re-prompt loop
       if (this.postReplyHook) {
-        reply = await this.postReplyHook(name, reply!, sender);
+        const MAX_REPROMPTS = 1;
+        let repromptCount = 0;
+        let hookResult = await this.postReplyHook(name, reply!, sender);
+        reply = hookResult.narrative;
+
+        while (hookResult.reprompt && repromptCount < MAX_REPROMPTS && live.session) {
+          repromptCount++;
+          console.log(`[fleet] ${name}: re-prompting (attempt ${repromptCount}/${MAX_REPROMPTS}) — ${hookResult.reprompt.slice(0, 60)}...`);
+          this.logToSession(name, live.sessionId, { type: "system_reprompt", text: hookResult.reprompt, attempt: repromptCount });
+
+          try {
+            const correctionReply = await this.withTimeout(
+              live.session.send(hookResult.reprompt),
+              this.timeouts.sendTimeoutMs,
+              `${name} re-prompt`,
+            );
+            hookResult = await this.postReplyHook(name, correctionReply, sender);
+            reply = hookResult.narrative || reply;
+            console.log(`[fleet] ${name}: re-prompt ${repromptCount} got reply (${correctionReply.length} chars), tools extracted`);
+          } catch (err) {
+            const errMsg = err instanceof Error ? err.message : String(err);
+            console.warn(`[fleet] ${name}: re-prompt failed: ${errMsg.slice(0, 80)}`);
+            break;
+          }
+        }
+
+        if (hookResult.reprompt && repromptCount >= MAX_REPROMPTS) {
+          console.warn(`[fleet] ${name}: re-prompt exhausted (${MAX_REPROMPTS} attempts) — dispatch may have been missed`);
+        }
       }
 
       live.state.messageCount++;

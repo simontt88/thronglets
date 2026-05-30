@@ -19,6 +19,11 @@ interface ParsedReply {
   blockParseError?: string;
 }
 
+export interface PostReplyHookResult {
+  narrative: string;
+  reprompt?: string;
+}
+
 export function parseReplyToolCalls(reply: string): ParsedReply {
   const result: ParsedReply = { narrative: reply, structuredCalls: [], legacyCalls: [] };
 
@@ -239,7 +244,7 @@ export function createPostReplyHook(
   workspaces: WorkspaceEntry[],
   commsMode: CommsMode,
 ) {
-  return async (agentName: string, reply: string, _sender: MessageSender): Promise<string> => {
+  return async (agentName: string, reply: string, _sender: MessageSender): Promise<PostReplyHookResult> => {
     const parsed = parseReplyToolCalls(reply);
     const isDispatcher = agentName === DISPATCHER_NAME;
 
@@ -249,9 +254,6 @@ export function createPostReplyHook(
     }
 
     const allCalls = [...parsed.structuredCalls, ...parsed.legacyCalls];
-    if (allCalls.length === 0 && !parsed.blockParseError) {
-      // No tool calls at all — fast path. Still run dispatch-claim self-check below.
-    }
 
     for (const call of allCalls) {
       const tool = TOOLS[call.tool];
@@ -276,18 +278,53 @@ export function createPostReplyHook(
       console.log(`[fleet-tools] ${agentName}: ${allCalls.length} tool call(s) (${parsed.structuredCalls.length} structured, ${parsed.legacyCalls.length} legacy)`);
     }
 
-    // Self-validation: narrate-but-not-emit
+    // Self-validation: narrate-but-not-emit → trigger re-prompt
     const claimedDispatch = detectDispatchClaim(parsed.narrative);
     const emittedDispatch = allCalls.some((c) => c.tool === "fleet_send" || c.tool === "fleet_spawn");
     if (claimedDispatch && !emittedDispatch) {
-      console.warn(`[fleet-tools] ${agentName}: NARRATE-WITHOUT-EMIT — claimed dispatch in narrative but emitted no fleet_send/fleet_spawn`);
+      console.warn(`[fleet-tools] ${agentName}: NARRATE-WITHOUT-EMIT — triggering re-prompt`);
       fleet.emitFleetActivity("narrate_without_emit", agentName, {
         narrative_excerpt: parsed.narrative.slice(0, 240),
       });
+      return {
+        narrative: parsed.narrative,
+        reprompt: NARRATE_WITHOUT_EMIT_CORRECTION,
+      };
     }
 
-    return parsed.narrative;
+    // Parse error in <TOOL_CALLS> block → re-prompt to retry
+    if (parsed.blockParseError && allCalls.length === 0) {
+      console.warn(`[fleet-tools] ${agentName}: TOOL_CALLS parse error — triggering re-prompt`);
+      return {
+        narrative: parsed.narrative,
+        reprompt: buildParseErrorCorrection(parsed.blockParseError),
+      };
+    }
+
+    return { narrative: parsed.narrative };
   };
+}
+
+const NARRATE_WITHOUT_EMIT_CORRECTION = `[from:system] ⚠️ CORRECTION REQUIRED: You claimed to dispatch/assign a task in your narrative, but you did NOT emit a fleet_send or fleet_spawn tool call. The message was NOT delivered.
+
+You MUST now emit the actual tool call. Reply with ONLY a <TOOL_CALLS> block containing the fleet_send you intended. Example:
+
+<TOOL_CALLS>
+[{ "tool": "fleet_send", "args": { "agent": "AgentName", "text": "your task description" } }]
+</TOOL_CALLS>
+
+Do NOT repeat your narrative. Just emit the tool call block.`;
+
+function buildParseErrorCorrection(error: string): string {
+  return `[from:system] ⚠️ Your <TOOL_CALLS> block had invalid JSON and was NOT executed. Error: ${error}
+
+Please re-emit the block with valid JSON. Reply with ONLY the corrected <TOOL_CALLS> block:
+
+<TOOL_CALLS>
+[{ "tool": "tool_name", "args": { ... } }]
+</TOOL_CALLS>
+
+Do NOT repeat your narrative. Just fix and re-emit the tool calls.`;
 }
 
 const STRUCTURED_PROTOCOL = `
