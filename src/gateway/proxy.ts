@@ -1,5 +1,7 @@
 import express, { Request, Response } from "express";
 import type { FleetEventBus } from "../fleet/manager.js";
+import { directiveStore } from "./directives.js";
+import { resolveModel, type ApiProvider } from "./models.js";
 
 export interface ToolCall {
   id: string;
@@ -90,8 +92,6 @@ function parseOpenAIToolCalls(choices: unknown[]): ToolCall[] {
 
 // ─── Gateway ─────────────────────────────────────────────────────────────────
 
-type ApiProvider = "anthropic" | "openai";
-
 interface GatewayConfig {
   provider: ApiProvider;
   apiKey: string;
@@ -142,16 +142,45 @@ class ApiGateway {
     return h;
   }
 
+  /**
+   * Apply a per-agent model directive: rewrite body.model to the resolved
+   * model for the agent's active tier. Returns the (possibly mutated) body.
+   */
+  private applyModelDirective(body: Record<string, unknown>): Record<string, unknown> {
+    if (this.agentName === "unknown") return body;
+    const tier = directiveStore.consumeTier(this.agentName);
+    if (!tier) return body;
+
+    const targetModel = resolveModel(this.cfg.provider, tier);
+    const currentModel = body.model as string | undefined;
+    if (!targetModel || targetModel === currentModel) return body;
+
+    body.model = targetModel;
+    this.bus.publish("model_switch", this.agentName, this.sessionId, {
+      from: currentModel,
+      to: targetModel,
+      tier,
+    });
+    console.log(`[gateway/${this.cfg.provider}] ${this.agentName} model switch → ${tier} (${currentModel} → ${targetModel})`);
+    return body;
+  }
+
   async handle(req: Request, res: Response): Promise<void> {
     // Build upstream URL
     const path = req.path.startsWith("/") ? req.path : `/${req.path}`;
     const url = `${this.cfg.baseUrl}${path}`;
 
+    // Apply per-task model switching directive before forwarding
+    let body = req.body as Record<string, unknown>;
+    if (req.method === "POST" && body && typeof body === "object") {
+      body = this.applyModelDirective(body);
+    }
+
     try {
       const upstream = await fetch(url, {
         method: req.method,
         headers: this.buildHeaders(req.headers),
-        body: req.method !== "GET" ? JSON.stringify(req.body) : undefined,
+        body: req.method !== "GET" ? JSON.stringify(body) : undefined,
       });
 
       const data = await upstream.json();

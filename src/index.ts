@@ -163,6 +163,10 @@ async function main() {
     process.exit(1);
   }
 
+  // Load model tier registry (small/mid/large → concrete model ids)
+  const { setModelRegistry } = await import("./gateway/models.js");
+  setModelRegistry(config.fleet.models);
+
   const transport = createTransport(config);
   const bus = new FleetEventBus();
 

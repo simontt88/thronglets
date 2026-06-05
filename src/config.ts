@@ -102,6 +102,9 @@ export const DEFAULT_EXTERNAL: ExternalConfig = {
   inviteExpiresHours: 72,              // 3 days
 };
 
+/** Per-provider tier → model overrides. Partial; merges onto built-in defaults. */
+export type ModelTierOverrides = Partial<Record<"openai" | "anthropic", Partial<Record<"small" | "mid" | "large", string>>>>;
+
 export interface FleetConfig {
   comms: CommsMode;
   timeouts: FleetTimeouts;
@@ -114,6 +117,8 @@ export interface FleetConfig {
   digest: DigestConfig;
   notificationCooldownMs: number;
   external: ExternalConfig;
+  /** Optional tier→model overrides (fleet.models in config.yaml). */
+  models?: ModelTierOverrides;
 }
 
 export interface BridgeConfig {
@@ -338,6 +343,7 @@ export function loadConfig(): BridgeConfig {
         };
       })(),
       notificationCooldownMs: Number(rawFleet?.notification_cooldown_ms ?? rawFleet?.notificationCooldownMs ?? 30 * 60 * 1000),
+      models: (rawFleet?.models as ModelTierOverrides | undefined) || undefined,
       external: (() => {
         const raw = rawFleet?.external as Record<string, unknown> | undefined;
         if (!raw) return DEFAULT_EXTERNAL;
