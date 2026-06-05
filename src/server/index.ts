@@ -5,7 +5,7 @@ import { fileURLToPath } from "url";
 import express from "express";
 import { createHttpApp } from "./http.js";
 import { attachWebSocket } from "./ws.js";
-import { createGatewayRouter } from "../gateway/proxy.js";
+import { createAnthropicGatewayRouter, createOpenAIGatewayRouter } from "../gateway/proxy.js";
 import type { FleetManager } from "../fleet/index.js";
 import type { FleetEventBus } from "../fleet/index.js";
 import type { BridgeConfig } from "../config.js";
@@ -46,20 +46,18 @@ export function createServerApp(
 ): express.Application {
   const app = createHttpApp(fleet, config);
 
-  // Mount Anthropic API gateway (intercepts tool_use calls for dashboard visualization)
-  // Gateway is enabled only if THRONGLETS_GATEWAY_ENABLED !== "false"
+  // Mount API gateways for tool_use observation (enabled unless THRONGLETS_GATEWAY_ENABLED=false)
   if (process.env.THRONGLETS_GATEWAY_ENABLED !== "false" && bus) {
-    try {
-      const apiKey = config.agents.find((a) => a.runtime === "claude-code")?.apiKey;
-      if (apiKey) {
-        const gatewayRouter = createGatewayRouter(bus, apiKey);
-        app.use("/gateway", gatewayRouter);
-        console.log(`[server] Gateway: Anthropic API proxy listening on /gateway`);
-      } else {
-        console.log(`[server] Gateway: skipped (no claude-code API key in config)`);
-      }
-    } catch (err) {
-      console.warn(`[server] Gateway: failed to mount: ${err instanceof Error ? err.message : err}`);
+    const anthropicKey = config.agents.find((a) => a.runtime === "claude-code")?.apiKey;
+    if (anthropicKey) {
+      app.use("/gateway", createAnthropicGatewayRouter(bus, anthropicKey));
+      console.log(`[server] Gateway: Anthropic proxy at /gateway`);
+    }
+
+    const openaiKey = config.agents.find((a) => a.runtime === "codex")?.apiKey;
+    if (openaiKey) {
+      app.use("/gateway/openai", createOpenAIGatewayRouter(bus, openaiKey));
+      console.log(`[server] Gateway: OpenAI proxy at /gateway/openai`);
     }
   }
 

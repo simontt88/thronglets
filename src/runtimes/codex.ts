@@ -29,10 +29,19 @@ export class CodexRuntime implements Runtime {
   async createSession(opts: RuntimeSessionOptions): Promise<AgentSession> {
     const { Codex } = await import("@openai/codex-sdk");
 
-    const model = opts.model || this.config.model || "o4-mini";
+    const model = opts.model || this.config.model || "gpt-4o-mini";
+    const apiKey = this.config.apiKey || process.env.OPENAI_API_KEY || "";
+
+    // Point to our OpenAI gateway for tool_call observation
+    // Disable with THRONGLETS_GATEWAY_ENABLED=false
+    const gatewayEnabled = process.env.THRONGLETS_GATEWAY_ENABLED !== "false";
+    if (gatewayEnabled) {
+      process.env.OPENAI_BASE_URL = "http://127.0.0.1:3847/gateway/openai";
+      console.log(`[codex] gateway enabled: http://127.0.0.1:3847/gateway/openai`);
+    }
 
     const codex = new Codex({
-      apiKey: this.config.apiKey || process.env.OPENAI_API_KEY,
+      apiKey,
       config: { model },
     });
 
