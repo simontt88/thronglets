@@ -5,6 +5,7 @@ import { fileURLToPath } from "url";
 import express from "express";
 import { createHttpApp } from "./http.js";
 import { attachWebSocket } from "./ws.js";
+import { createGatewayRouter } from "../gateway/proxy.js";
 import type { FleetManager } from "../fleet/index.js";
 import type { FleetEventBus } from "../fleet/index.js";
 import type { BridgeConfig } from "../config.js";
@@ -41,8 +42,26 @@ function findChillDir(): string | null {
 export function createServerApp(
   fleet: FleetManager,
   config: BridgeConfig,
+  bus?: FleetEventBus,
 ): express.Application {
   const app = createHttpApp(fleet, config);
+
+  // Mount Anthropic API gateway (intercepts tool_use calls for dashboard visualization)
+  // Gateway is enabled only if THRONGLETS_GATEWAY_ENABLED !== "false"
+  if (process.env.THRONGLETS_GATEWAY_ENABLED !== "false" && bus) {
+    try {
+      const apiKey = config.agents.find((a) => a.runtime === "claude-code")?.apiKey;
+      if (apiKey) {
+        const gatewayRouter = createGatewayRouter(bus, apiKey);
+        app.use("/gateway", gatewayRouter);
+        console.log(`[server] Gateway: Anthropic API proxy listening on /gateway`);
+      } else {
+        console.log(`[server] Gateway: skipped (no claude-code API key in config)`);
+      }
+    } catch (err) {
+      console.warn(`[server] Gateway: failed to mount: ${err instanceof Error ? err.message : err}`);
+    }
+  }
 
   // Serve chill mode (thronglets-viz) static files
   const chillDir = findChillDir();

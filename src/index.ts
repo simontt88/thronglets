@@ -323,7 +323,7 @@ async function main() {
 
   const realPort = parseInt(process.env.BRIDGE_PORT || "") || 3847;
   const port = realPort;
-  const app = createServerApp(fleet, config);
+  const app = createServerApp(fleet, config, bus);
 
   // Event logging
   bus.onEvent((event) => {
