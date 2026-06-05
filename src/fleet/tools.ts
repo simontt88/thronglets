@@ -179,6 +179,31 @@ const TOOLS: Record<string, ToolDef> = {
       return fleet.getRecentTaskLog(limit);
     },
   },
+
+  fleet_set_tier: {
+    permission: "dispatcher",
+    async execute(args, _agentName, fleet) {
+      const name = args.name as string;
+      const tier = args.tier as string;
+      const oneShot = args.one_shot === true || args.oneShot === true;
+      if (!name || !tier) return "Error: fleet_set_tier requires 'name' and 'tier' (small|mid|large)";
+      const { directiveStore } = await import("../gateway/directives.js");
+      const { isValidTier } = await import("../gateway/models.js");
+      if (!isValidTier(tier)) return `Error: invalid tier "${tier}" — use small, mid, or large`;
+      if (!fleet.hasAgent(name)) return `Error: agent "${name}" not found`;
+      directiveStore.setTier(name, tier, oneShot);
+      return `Set @${name} model tier → ${tier}${oneShot ? " (next task only)" : ""}`;
+    },
+  },
+
+  fleet_dispatch_status: {
+    permission: "dispatcher",
+    async execute(_args, _agentName, fleet) {
+      const engine = fleet.getDispatchEngine();
+      if (!engine) return "Dispatch engine not active (gateway disabled?)";
+      return engine.summary();
+    },
+  },
 };
 
 export function createPostReplyHook(
@@ -253,6 +278,11 @@ You can execute fleet operations by including markers in your reply:
   Levels: "critical" (always delivered), "info" (throttled, for progress updates)
 - View task log: [FLEET:fleet_task_log:{"limit":20}]
   See recent task dispatches and their outcomes (completed/failed/pending).
+- Set a throng's model tier: [FLEET:fleet_set_tier:{"name":"agentname","tier":"small|mid|large","one_shot":true}]
+  Picks which model class runs the throng's NEXT task. small=cheap/fast, mid=balanced, large=most capable.
+  one_shot:true applies to one task then reverts. Use large for refactors/architecture/hard debugging, small for renames/typos/formatting.
+- View dispatch telemetry: [FLEET:fleet_dispatch_status:{}]
+  Per-throng cost, tool counts, success rate, active file locks, and budget status — use this to route smartly and avoid two throngs editing the same file.
 
 You can include multiple markers in one reply. Results are logged to your session.
 Include the marker anywhere in your reply text — it will be stripped before showing to the user.

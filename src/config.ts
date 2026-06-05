@@ -119,6 +119,10 @@ export interface FleetConfig {
   external: ExternalConfig;
   /** Optional tier→model overrides (fleet.models in config.yaml). */
   models?: ModelTierOverrides;
+  /** Per-agent USD budget for the dispatch engine (0 = unlimited). */
+  budgetUsdPerAgent: number;
+  /** File-ownership lock TTL in ms (conflict-prevention window). */
+  lockTtlMs: number;
 }
 
 export interface BridgeConfig {
@@ -344,6 +348,8 @@ export function loadConfig(): BridgeConfig {
       })(),
       notificationCooldownMs: Number(rawFleet?.notification_cooldown_ms ?? rawFleet?.notificationCooldownMs ?? 30 * 60 * 1000),
       models: (rawFleet?.models as ModelTierOverrides | undefined) || undefined,
+      budgetUsdPerAgent: Number(rawFleet?.budget_usd_per_agent ?? rawFleet?.budgetUsdPerAgent ?? 0),
+      lockTtlMs: Number(rawFleet?.lock_ttl_ms ?? rawFleet?.lockTtlMs ?? 5 * 60 * 1000),
       external: (() => {
         const raw = rawFleet?.external as Record<string, unknown> | undefined;
         if (!raw) return DEFAULT_EXTERNAL;

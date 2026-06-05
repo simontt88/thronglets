@@ -118,6 +118,7 @@ export class FleetManager {
   private fleetActivityCallback: FleetActivityCallback | null = null;
   private outgoingMediaCallback: OutgoingMediaCallback | null = null;
   private taskLedger: TaskRecord[] = [];
+  private dispatchEngine: import("./dispatch-engine.js").DispatchEngine | null = null;
   private workingStartedAt = new Map<string, number>();
   private repliedToDispatcher = new Set<string>();
   private recentFailures = new Map<string, number[]>(); // agent -> recent failure timestamps (retry-storm guard)
@@ -137,6 +138,14 @@ export class FleetManager {
 
   get timeouts(): FleetTimeouts {
     return this.healthMonitor.timeouts;
+  }
+
+  setDispatchEngine(engine: import("./dispatch-engine.js").DispatchEngine): void {
+    this.dispatchEngine = engine;
+  }
+
+  getDispatchEngine(): import("./dispatch-engine.js").DispatchEngine | null {
+    return this.dispatchEngine;
   }
 
   setPostReplyHook(hook: (agentName: string, reply: string, sender: MessageSender) => Promise<string>): void {

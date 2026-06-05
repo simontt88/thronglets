@@ -196,6 +196,14 @@ async function main() {
   await fleet.restore();
   fleet.setPostReplyHook(createPostReplyHook(fleet, workspaces, config.fleet.comms));
 
+  // Dispatch engine — consumes gateway telemetry for cost/conflict/capability routing
+  const { DispatchEngine } = await import("./fleet/dispatch-engine.js");
+  const dispatchEngine = new DispatchEngine(bus, {
+    budgetUsdPerAgent: config.fleet.budgetUsdPerAgent,
+    lockTtlMs: config.fleet.lockTtlMs,
+  });
+  fleet.setDispatchEngine(dispatchEngine);
+
   // Wire command router (handles all Telegram commands + @mentions + routing)
   const { getNotifyChatId } = setupCommandRouter({
     fleet, bus, transport, config, workspaces, version: VERSION,
