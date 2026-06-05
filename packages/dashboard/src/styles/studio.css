@@ -1448,3 +1448,64 @@ strong { font-weight: 700; color: var(--t-1); }
 /* Mode toggle */
 .mode-toggle { font-size: 16px; }
 .mode-toggle.active { background: rgba(72,187,120,0.15); }
+
+/* ─── Activity Timeline (Phase E — gateway telemetry) ─────────────────────── */
+.activity-panel {
+  position: fixed; right: 16px; bottom: 84px; z-index: 50;
+  width: 360px; max-height: 56vh;
+  display: flex; flex-direction: column;
+  background: var(--bg-3); backdrop-filter: blur(12px);
+  border: 1px solid var(--t-4); border-radius: 14px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+  overflow: hidden; font-size: 12px;
+}
+.activity-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; font-weight: 600; color: var(--t-1);
+  border-bottom: 1px solid var(--t-4);
+}
+.activity-close {
+  background: none; border: none; color: var(--t-4); cursor: pointer;
+  font-size: 14px; line-height: 1;
+}
+.activity-close:hover { color: var(--t-2); }
+.activity-stats {
+  display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px;
+  border-bottom: 1px solid var(--t-4); max-height: 120px; overflow-y: auto;
+}
+.activity-badge {
+  display: flex; align-items: center; gap: 5px;
+  padding: 3px 8px; border-radius: 999px;
+  border: 1.5px solid var(--t-4); background: var(--bg-2);
+  font-size: 11px; white-space: nowrap;
+}
+.ab-mood { font-size: 13px; }
+.ab-name { font-weight: 700; }
+.ab-lvl { font-weight: 600; color: var(--st-working); }
+.ab-meta { color: var(--t-2); }
+.ab-tests { color: #48bb78; }
+.activity-feed {
+  flex: 1; overflow-y: auto; padding: 6px 0;
+}
+.activity-empty {
+  padding: 28px 16px; text-align: center; color: var(--t-4); line-height: 1.6;
+}
+.activity-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 14px; border-bottom: 1px solid rgba(128,128,128,0.08);
+}
+.activity-row.is-error { background: rgba(229,62,62,0.08); }
+.ar-icon { width: 16px; text-align: center; }
+.ar-agent { font-weight: 700; flex-shrink: 0; }
+.ar-summary {
+  flex: 1; color: var(--t-1); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.ar-time { color: var(--t-4); font-size: 10px; flex-shrink: 0; }
+.activity-fab {
+  position: fixed; right: 16px; bottom: 84px; z-index: 50;
+  padding: 10px 14px; border-radius: 999px;
+  background: var(--bg-3); border: 1px solid var(--t-4); color: var(--t-1);
+  font-size: 13px; cursor: pointer; box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+}
+.activity-fab:hover { border-color: var(--st-working); }

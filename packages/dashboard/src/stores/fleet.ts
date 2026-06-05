@@ -53,6 +53,30 @@ export interface ChillNotification {
   ts: number;
 }
 
+// Gateway-derived live activity (the "fog-clearing" feed)
+export interface ActivityItem {
+  id: string;
+  ts: string;
+  agent: string;
+  kind: "tool_call" | "tool_result" | "usage" | "model_switch";
+  icon: string;
+  summary: string;
+  ok?: boolean;
+}
+
+export interface GameStats {
+  xp: number;
+  level: number;
+  toolCalls: number;
+  testsPassed: number;
+  errors: number;
+  avgLatencyMs: number;
+  totalTokens: number;
+  costUsd: number;
+  specialty: string;
+  mood: "idle" | "thinking" | "working" | "stuck" | "triumphant" | "exhausted";
+}
+
 interface FleetStore {
   agents: AgentState[];
   workspaces: WorkspaceEntry[];
@@ -66,6 +90,12 @@ interface FleetStore {
   dispatcherOpen: boolean;
   selectedAgent: string | null;
   chillNotifications: ChillNotification[];
+
+  // Gateway telemetry (Phase E)
+  activity: ActivityItem[];
+  gameStats: Record<string, GameStats>;
+  activityOpen: boolean;
+  toggleActivity: () => void;
 
   // Per-card session viewing
   viewingSession: Record<string, string>; // agentName → sessionId being viewed
@@ -123,6 +153,10 @@ export const useFleetStore = create<FleetStore>((set, get) => ({
   dispatcherOpen: true,
   selectedAgent: null,
   chillNotifications: [],
+  activity: [],
+  gameStats: {},
+  activityOpen: true,
+  toggleActivity: () => set((s) => ({ activityOpen: !s.activityOpen })),
   viewingSession: {},
   sessionLists: {},
   sessionEvents: {},
@@ -330,9 +364,64 @@ export function connectWS() {
             sessionEvents: { ...s.sessionEvents, [event.agentName]: [] },
           }));
           break;
+
+        // ─── Gateway telemetry (Phase E) ───
+        case "tool_call": {
+          const tool = event.payload?.tool;
+          pushActivity(event.agentName, "tool_call", tool?.summary || tool?.name || "tool", event.ts);
+          break;
+        }
+        case "tool_result": {
+          const r = event.payload?.result;
+          pushActivity(event.agentName, "tool_result", r?.ok === false ? "✗ failed" : "✓ ok", event.ts, r?.ok);
+          break;
+        }
+        case "usage": {
+          const u = event.payload?.usage;
+          if (u) {
+            pushActivity(event.agentName, "usage",
+              `${u.inputTokens}+${u.outputTokens} tok · $${(u.costUsd || 0).toFixed(4)} · ${u.latencyMs}ms`, event.ts);
+          }
+          // Refresh game stats on each usage tick (cheap, authoritative)
+          fetchGame();
+          break;
+        }
+        case "model_switch": {
+          const p = event.payload;
+          pushActivity(event.agentName, "model_switch", `${p?.tier} (${p?.from}→${p?.to})`, event.ts);
+          break;
+        }
       }
     }
   };
+}
+
+const ACTIVITY_ICONS: Record<string, string> = {
+  tool_call: "🔧",
+  tool_result: "↩",
+  usage: "💰",
+  model_switch: "🔀",
+};
+
+function pushActivity(agent: string, kind: ActivityItem["kind"], summary: string, ts: string, ok?: boolean) {
+  const item: ActivityItem = {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    ts: ts || new Date().toISOString(),
+    agent,
+    kind,
+    icon: ACTIVITY_ICONS[kind] || "•",
+    summary,
+    ok,
+  };
+  useFleetStore.setState((s) => ({ activity: [...s.activity, item].slice(-120) }));
+}
+
+export async function fetchGame() {
+  try {
+    const res = await fetch(`${serverBase.http}/api/game`);
+    const data = await res.json();
+    useFleetStore.setState({ gameStats: data.stats || {} });
+  } catch {}
 }
 
 function appendSessionEvent(agentName: string, event: SessionEvent) {
