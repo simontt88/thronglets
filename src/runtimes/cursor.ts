@@ -96,12 +96,23 @@ class CursorSession implements AgentSession {
   }
 }
 
+/**
+ * @deprecated Cursor runs its agent loop in Cursor's cloud, so its model traffic
+ * never passes through the Thronglets gateway — meaning no tool-call visibility,
+ * no per-task model switching, no telemetry-driven dispatch or gamification.
+ * Prefer the `codex` (OpenAI) or `claude-code` (Anthropic) runtimes, whose
+ * traffic the gateway can observe. See docs/gateway-strategy.md.
+ */
 export class CursorRuntime implements Runtime {
   readonly name = "cursor";
 
   constructor(private config: CursorRuntimeConfig) {}
 
   async createSession(opts: RuntimeSessionOptions): Promise<AgentSession> {
+    console.warn(
+      "[cursor] ⚠️ DEPRECATED runtime — Cursor traffic bypasses the gateway " +
+      "(no tool visibility, model switching, or gamification). Use codex or claude-code instead.",
+    );
     let sdk: Record<string, unknown>;
     try {
       sdk = await import("@cursor/sdk");

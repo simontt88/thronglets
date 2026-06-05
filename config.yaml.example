@@ -5,11 +5,20 @@ telegram:
   allowed_chats:
     - "your-chat-id"    # Get via: send /start to @userinfobot on Telegram
 
+# Runtimes: prefer `codex` (OpenAI) or `claude-code` (Anthropic) — their model
+# traffic flows through the Thronglets gateway, which unlocks tool-call visibility,
+# per-task model switching, telemetry-driven dispatch, and gamification.
+# `cursor` is DEPRECATED: it runs in Cursor's cloud and bypasses the gateway.
 agents:
   - name: default
-    runtime: cursor
-    api_key: ${CURSOR_API_KEY}  # Get from: https://cursor.com/settings
-    model: claude-opus-4-6
+    runtime: codex
+    api_key: ${OPENAI_API_KEY}   # Get from: https://platform.openai.com/api-keys
+    model: gpt-4o-mini
+
+  # - name: claude
+  #   runtime: claude-code
+  #   api_key: ${ANTHROPIC_API_KEY}
+  #   model: claude-haiku-4-5-20251001
 
 # Dispatcher: AI-powered message router that manages the fleet
 dispatcher:
@@ -40,6 +49,22 @@ fleet:
     inter_agent: summary
     # tool_calls: show fleet tool execution logs
     tool_calls: true
+
+  # ─── Gateway-powered dispatch (Phase A–E) ───
+  # Per-task model tiers. Dispatch picks small/mid/large per task and the gateway
+  # rewrites the model on the fly. Override the defaults here if you like:
+  # models:
+  #   openai:    { small: gpt-4o-mini, mid: gpt-4o, large: gpt-4.1 }
+  #   anthropic: { small: claude-haiku-4-5-20251001, mid: claude-sonnet-4-6, large: claude-opus-4-8 }
+
+  # Per-agent USD budget (0 = unlimited). The dispatch engine flags over-budget throngs.
+  # budget_usd_per_agent: 0
+
+  # File-ownership lock window (ms). Stops two throngs editing the same file at once.
+  # lock_ttl_ms: 300000
+
+# Gateway: set THRONGLETS_GATEWAY_ENABLED=false to disable the API proxy entirely
+# (falls back to plain SDK calls — no telemetry, dispatch, or gamification).
 
 # Optional: local conversation logs
 session:

@@ -1,10 +1,26 @@
 # Gateway 策划方案 — 采集 · Dispatch · 游戏化
 
-> 状态：草案 v1 · 地基已验证（PoC 通过 Anthropic + OpenAI 双协议拦截）
+> 状态：**Phase A–E 已实现并各自闭环通过**（详见文末「实现进度」）
 >
 > 一句话：把 runtime 从「调用厂商 SDK 拿一段文本」改成「坐在模型 API 前面当网关」，
 > 从此能看见 agent 干活的**全过程**——这是让 vibe coding 从"一团雾水"变成
 > "清晰可见、好理解、有趣、流畅"的唯一地基。
+
+## 实现进度（截至当前分支）
+
+| 阶段 | 状态 | 关键文件 | 闭环测试 |
+|------|:----:|---------|---------|
+| **P0** 网关 PoC | ✅ | `src/gateway/proxy.ts` | `test/gateway-openai.ts` |
+| **A** 模型三档 + per-task 切换 | ✅ | `gateway/models.ts` `gateway/directives.ts` | `test/gateway-model-switch.ts` |
+| **B** 采集脊柱（SSE 流式 + trace） | ✅ | `gateway/sse.ts` `gateway/trace.ts` | `test/gateway-streaming.ts` |
+| **C** Dispatch 引擎 | ✅ | `fleet/dispatch-engine.ts` | `test/dispatch-engine.test.ts` |
+| **D** 游戏化内核 | ✅ | `fleet/game-state.ts` | `test/game-state.test.ts` |
+| **E** Dashboard 时间线 + 游戏视图 | ✅ | `dashboard/components/ActivityTimeline.tsx` | `test/e2e-pipeline.ts` |
+| **F** 自研 agent loop（北极星） | ⬜ | — | — |
+
+- **Cursor 已弃用**：`CursorRuntime` 标注 `@deprecated` 并在运行时打警告；默认 runtime 改为 `codex`。
+- 纯逻辑测试（C/D）已纳入 vitest CI；网关测试为独立脚本（需 `OPENAI_API_KEY`，兼作 demo）。
+- 逃生阀：`THRONGLETS_GATEWAY_ENABLED=false` 一键回退到纯 SDK 调用。
 
 ---
 
