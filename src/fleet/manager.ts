@@ -119,6 +119,7 @@ export class FleetManager {
   private outgoingMediaCallback: OutgoingMediaCallback | null = null;
   private taskLedger: TaskRecord[] = [];
   private dispatchEngine: import("./dispatch-engine.js").DispatchEngine | null = null;
+  private gameEngine: import("./game-state.js").GameEngine | null = null;
   private workingStartedAt = new Map<string, number>();
   private repliedToDispatcher = new Set<string>();
   private recentFailures = new Map<string, number[]>(); // agent -> recent failure timestamps (retry-storm guard)
@@ -146,6 +147,14 @@ export class FleetManager {
 
   getDispatchEngine(): import("./dispatch-engine.js").DispatchEngine | null {
     return this.dispatchEngine;
+  }
+
+  setGameEngine(engine: import("./game-state.js").GameEngine): void {
+    this.gameEngine = engine;
+  }
+
+  getGameEngine(): import("./game-state.js").GameEngine | null {
+    return this.gameEngine;
   }
 
   setPostReplyHook(hook: (agentName: string, reply: string, sender: MessageSender) => Promise<string>): void {

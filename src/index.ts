@@ -204,6 +204,11 @@ async function main() {
   });
   fleet.setDispatchEngine(dispatchEngine);
 
+  // Game engine — turns telemetry into XP/level/mood (gamification)
+  const { GameEngine } = await import("./fleet/game-state.js");
+  const gameEngine = new GameEngine(bus);
+  fleet.setGameEngine(gameEngine);
+
   // Wire command router (handles all Telegram commands + @mentions + routing)
   const { getNotifyChatId } = setupCommandRouter({
     fleet, bus, transport, config, workspaces, version: VERSION,

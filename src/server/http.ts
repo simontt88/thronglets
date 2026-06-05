@@ -107,6 +107,17 @@ export function createHttpApp(
     });
   });
 
+  // Gamification + dispatch telemetry (gateway-derived)
+  app.get("/api/game", (_req, res) => {
+    const game = fleet.getGameEngine();
+    const dispatch = fleet.getDispatchEngine();
+    res.json({
+      stats: game ? game.getAll() : {},
+      dispatch: dispatch ? { totalCost: dispatch.getTotalCost() } : null,
+      enabled: !!game,
+    });
+  });
+
   app.get("/api/agents/:name", (req, res) => {
     const agent = fleet.getAgent(req.params.name);
     if (!agent) {
