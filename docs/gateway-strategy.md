@@ -1,6 +1,6 @@
 # Gateway 策划方案 — 采集 · Dispatch · 游戏化
 
-> 状态：**Phase A–E 已实现并各自闭环通过**（详见文末「实现进度」）
+> 状态：**Phase A–F 全部实现并各自闭环通过**（详见文末「实现进度」）
 >
 > 一句话：把 runtime 从「调用厂商 SDK 拿一段文本」改成「坐在模型 API 前面当网关」，
 > 从此能看见 agent 干活的**全过程**——这是让 vibe coding 从"一团雾水"变成
@@ -16,7 +16,7 @@
 | **C** Dispatch 引擎 | ✅ | `fleet/dispatch-engine.ts` | `test/dispatch-engine.test.ts` |
 | **D** 游戏化内核 | ✅ | `fleet/game-state.ts` | `test/game-state.test.ts` |
 | **E** Dashboard 时间线 + 游戏视图 | ✅ | `dashboard/components/ActivityTimeline.tsx` | `test/e2e-pipeline.ts` |
-| **F** 自研 agent loop（北极星） | ⬜ | — | — |
+| **F** 自研 agent loop（北极星） | ✅ | `runtimes/native/` | `test/native-tools.test.ts` `test/native-loop.test.ts` `test/native-runtime.ts` |
 
 - **Cursor 已弃用**：`CursorRuntime` 标注 `@deprecated` 并在运行时打警告；默认 runtime 改为 `codex`。
 - 纯逻辑测试（C/D）已纳入 vitest CI；网关测试为独立脚本（需 `OPENAI_API_KEY`，兼作 demo）。
@@ -60,8 +60,9 @@ PoC 已验证（`test/gateway-openai.ts`）：OpenAI tool-calling 请求经网�
 | Runtime | 模型流量 | 网关可观测 | 决策 |
 |---------|---------|:---------:|------|
 | **Cursor** | Cursor 自己的云 | ❌ 永远不行（流量不经过本机） | **弃用** |
-| **Codex** | OpenAI API | ✅ `OPENAI_BASE_URL` 可配 | **主力**（成本优先） |
+| **Codex** | OpenAI API | ✅ `OPENAI_BASE_URL` 可配 | 主力（成本优先） |
 | **Claude Code** | Anthropic API | ✅ `ANTHROPIC_BASE_URL` 可配 | 备用 / 高难度任务 |
+| **Native** (Phase F) | OpenAI / Anthropic API（进程内自跑 loop） | ✅ 遥测直连总线，无需网关 | **北极星**：最彻底的控制 |
 
 Cursor 在结构上就与"全程可见"的目标冲突——它的整条思维链都在 Cursor 云端，本机没有
 拦截点。要让整条管线自洽（一切可见、可计费、可调度），就必须以可观测的 runtime 为核心。
@@ -255,9 +256,25 @@ PixelThronglet 已有 working/waiting/sleeping/dead 的情绪动画，现在喂�
 | **P3 Dispatch 引擎** | 文件锁防撞车 · 成本预算硬护栏 · 负载/健康路由 | 多 agent 协作不再撞文件；超预算自动拦 |
 | **P4 游戏化内核** | XP/属性/真实情绪 · 奖励反应 | 你会真的为一只 throng 升级而开心，为它 stuck 而心疼 |
 | **P5 RTS 地图** ⭐ | 代码库即世界的实时观战视图 · quest 卡 | 头牌体验，截图/视频即传播素材 |
-| **P6 北极星** | 自研 agent loop（不依赖厂商 SDK，网关里直接跑循环） | 更彻底的控制：会话中途换模型、协议级注入工具、最多调度策略 |
+| **P6 北极星** ✅ | 自研 agent loop（`runtime: native`，不依赖厂商 SDK，进程内直接跑 tool 循环） | 更彻底的控制：会话中途换模型、协议级注入工具、最多调度策略 |
 
 P1 + P2 是"一鸣惊人"的最短路径——先把雾散掉。
+
+### Phase F 落地说明（自研 loop）
+
+`runtime: native` 选中 `src/runtimes/native/`。与网关路线的关键区别：
+
+- **进程内自跑循环**：`AgentLoop.run()` 直接 `调用模型 → 解析 tool_call → 本地执行 → 回灌结果 → 再循环`，
+  直到模型给出最终文本。不再经过 codex-sdk / claude-agent-sdk。
+- **遥测直连总线**：因为 loop 在我们手里，`tool_call/tool_result/usage/model_switch` 事件**直接 publish** 到
+  `FleetEventBus`——无需 marker、无需 SSE 重组。Dispatch + 游戏化照常订阅，native throng 直接在 Dashboard 点亮。
+- **真·任务中途换模型**：模型在**每一步**前读 `directiveStore.consumeTier()`，可在两次 tool 调用之间 small→large。
+- **双 provider**：`agent-loop.ts` 用 adapter 抽象 OpenAI（chat completions）与 Anthropic（messages），
+  按 model id 自动判定（`claude*` → anthropic）。
+- **工具集**：`read_file / write_file / edit_file / list_dir / grep / run_bash`，在 workspace 内本地执行。
+
+闭环测试：`test/native-tools.test.ts`（执行器）+ `test/native-loop.test.ts`（脚本化 transport 跑通整圈循环、
+模型切换、双 provider 适配）+ `test/native-runtime.ts`（真实 OpenAI 流量端到端）。
 
 ---
 

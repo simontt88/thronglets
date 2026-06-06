@@ -6,6 +6,7 @@ import { TelegramTransport } from "./transports/telegram.js";
 import { CursorRuntime } from "./runtimes/cursor.js";
 import { ClaudeCodeRuntime } from "./runtimes/claude-code.js";
 import { CodexRuntime } from "./runtimes/codex.js";
+import { NativeRuntime } from "./runtimes/native/index.js";
 import { FleetManager, FleetEventBus } from "./fleet/index.js";
 import { loadWorkspaces as loadWorkspacesFromState } from "./fleet/state.js";
 import type { WorkspaceEntry } from "./fleet/index.js";
@@ -131,7 +132,7 @@ function createTransport(cfg: BridgeConfig) {
   }
 }
 
-function createRuntime(agent: AgentDef): Runtime {
+function createRuntime(agent: AgentDef, bus?: FleetEventBus): Runtime {
   switch (agent.runtime) {
     case "cursor":
       return new CursorRuntime({ apiKey: agent.apiKey, model: agent.model });
@@ -142,6 +143,9 @@ function createRuntime(agent: AgentDef): Runtime {
       });
     case "codex":
       return new CodexRuntime({ model: agent.model, apiKey: agent.apiKey, approvalPolicy: agent.approvalPolicy });
+    case "native":
+      // Phase F: self-hosted loop. Pass the bus so telemetry flows straight to dispatch + game.
+      return new NativeRuntime({ model: agent.model, apiKey: agent.apiKey, bus });
     default:
       console.error(`[fatal] unsupported runtime: ${agent.runtime}`);
       process.exit(1);
@@ -177,7 +181,7 @@ async function main() {
 
   const fleet = new FleetManager(bus, {
     workspaces,
-    createRuntime: (agentDef: AgentDef) => createRuntime(agentDef),
+    createRuntime: (agentDef: AgentDef) => createRuntime(agentDef, bus),
     ensureRulesSync: (agentDef: AgentDef) => ensureRulesSync(agentDef, config.workspace),
     getAgentDef: (runtime: RuntimeType, model?: string) => {
       const match = config.agents.find((a) => a.runtime === runtime);
@@ -186,6 +190,7 @@ async function main() {
         cursor: "claude-sonnet-4-6",
         "claude-code": "claude-sonnet-4-6",
         codex: "o4-mini",
+        native: "gpt-4o-mini",
       };
       return { name: runtime, runtime, apiKey: "", model: model || defaultModels[runtime] || "claude-sonnet-4-6" };
     },

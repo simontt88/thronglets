@@ -20,6 +20,15 @@ agents:
   #   api_key: ${ANTHROPIC_API_KEY}
   #   model: claude-haiku-4-5-20251001
 
+  # `native` (Phase F): Thronglets runs the agent loop itself — no vendor SDK.
+  # Talks to the OpenAI/Anthropic API directly, executes tools in-process, and
+  # emits telemetry straight to the fleet bus (dispatch + gamification for free).
+  # Provider is inferred from the model id (claude* → anthropic, else openai).
+  # - name: nova
+  #   runtime: native
+  #   api_key: ${OPENAI_API_KEY}
+  #   model: gpt-4o-mini
+
 # Dispatcher: AI-powered message router that manages the fleet
 dispatcher:
   enabled: true

@@ -4,7 +4,7 @@ import { homedir } from "os";
 import { parse as parseYaml } from "yaml";
 
 export type TransportType = "telegram" | "lark" | "discord";
-export type RuntimeType = "cursor" | "claude-code" | "codex";
+export type RuntimeType = "cursor" | "claude-code" | "codex" | "native";
 export type PermissionMode = "readonly" | "safe" | "full" | "custom";
 export type RecallMode = "local" | "cloud" | "both" | "off";
 export type CommsMode = "swarm" | "hive" | "leash";
