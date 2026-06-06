@@ -87,7 +87,8 @@ export class NativeRuntime implements Runtime {
     const session = opts.name ? `native-${opts.name}-${Date.now().toString(36)}` : `native-${Date.now().toString(36)}`;
 
     const loop = new AgentLoop({
-      agent: opts.name || "native",
+      // Attribute telemetry to the throng's display name, not the session label.
+      agent: opts.agentName || opts.name || "native",
       session,
       provider,
       apiKey,

@@ -43,6 +43,8 @@ canvas{display:block}
     <span class="stat"><span class="dot dot-sleep"></span><b id="ss">0</b></span>
     <span class="stat">🍖 <b id="f">0</b></span>
     <span class="stat">💬 <b id="c">0</b></span>
+    <span class="stat" title="discovered artifacts (loot)">🎁 <b id="lt">0</b></span>
+    <span class="stat" id="legendary-stat" title="legendary relics" style="opacity:.85;display:none">⭐ <b id="lg" style="color:#f5b942">0</b></span>
     <span class="stat" id="time-indicator" style="opacity:.7">☀️ <b id="tod">day</b></span>
   </div>
 </div>
@@ -806,7 +808,11 @@ function getBot(x, y) { for (let i = bots.length - 1; i >= 0; i--) { if (Math.hy
 
 function act(x, y) {
   if (tool === 'spawn') { const b = new Bot(x, y); bots.push(b); toast(`🥚 ${b.name} hatched!`, '#b0e0a0'); return; }
-  if (tool === 'inspect') { const b = getBot(x, y); if (b) showTip(x, y, b); return; }
+  if (tool === 'inspect') {
+    const l = getLoot(x, y); if (l) { showLootTip(x, y, l); return; }
+    const b = getBot(x, y); if (b) showTip(x, y, b); return;
+  }
+  const lh = getLoot(x, y); if (lh) { showLootTip(x, y, lh); lh.pulse = 1; emits(lh.x, lh.y - 8, '✨'); return; }
   const b = getBot(x, y); if (!b) return;
   if (tool === 'feed') b.feed();
   else if (tool === 'pet') b.pet();
@@ -824,7 +830,7 @@ function showTip(x, y, b) {
 
 cv.onmousedown = e => { md = true; act(e.clientX, e.clientY); };
 cv.onmouseup = () => md = false;
-cv.onmousemove = e => { mx = e.clientX; my = e.clientY; if (md && tool === 'pet') { const b = getBot(mx, my); if (b && b.mood !== 1) b.pet(); } cv.style.cursor = getBot(mx, my) ? (tool === 'inspect' ? 'help' : 'pointer') : 'crosshair'; };
+cv.onmousemove = e => { mx = e.clientX; my = e.clientY; if (md && tool === 'pet') { const b = getBot(mx, my); if (b && b.mood !== 1) b.pet(); } cv.style.cursor = (getBot(mx, my) || getLoot(mx, my)) ? (tool === 'inspect' ? 'help' : 'pointer') : 'crosshair'; };
 cv.oncontextmenu = e => { e.preventDefault(); const old = tool; tool = 'poke'; act(e.clientX, e.clientY); tool = old; };
 cv.ontouchstart = e => { e.preventDefault(); const t = e.touches[0]; mx = t.clientX; my = t.clientY; act(mx, my); };
 cv.ontouchmove = e => { const t = e.touches[0]; mx = t.clientX; my = t.clientY; };
@@ -859,6 +865,148 @@ function updateHUD() {
   document.getElementById('time-indicator').firstChild.textContent = todIcon + ' ';
 }
 
+// ============================================================
+// ARTIFACT LOOT — files-as-loot, dropped into the habitat world.
+// The parent dashboard posts the atlas (/api/atlas) in; each artifact
+// becomes a collectible relic on the ground, ranked by how widely it's
+// used across sessions. This is the gamification *inside* the world,
+// not a separate modal.
+// ============================================================
+const RARITY_COLOR = { common:'#9ca3af', uncommon:'#22c55e', rare:'#3b82f6', epic:'#a855f7', legendary:'#f5b942' };
+const RARITY_RANK = { common:0, uncommon:1, rare:2, epic:3, legendary:4 };
+const CLASS_GLYPH = { tome:'📖', rune:'⚙️', crystal:'💎', tool:'🛠️', relic:'🗿' };
+const MAX_LOOT = 42; // keep the meadow readable
+
+let loot = [];
+const lootPos = new Map(); // id -> {x,y} stable placement across refreshes
+
+function lootBasename(id) { const p = String(id).split('/'); return p[p.length - 1]; }
+
+function placeLoot(id) {
+  if (lootPos.has(id)) return lootPos.get(id);
+  // deterministic-ish scatter inside the fenced meadow, away from the border
+  const h = hash32(id);
+  const m = 96;
+  const x = m + (h % 1000) / 1000 * (W - m * 2);
+  const y = m + ((h >>> 10) % 1000) / 1000 * (H - m * 2);
+  const pos = { x, y };
+  lootPos.set(id, pos);
+  return pos;
+}
+
+function ingestAtlas(items) {
+  if (!Array.isArray(items)) return;
+  // strongest relics first, capped so the world stays legible
+  const top = [...items]
+    .sort((a, b) => (RARITY_RANK[b.rarity] - RARITY_RANK[a.rarity]) || (b.level - a.level))
+    .slice(0, MAX_LOOT);
+  loot = top.map((it) => {
+    const pos = placeLoot(it.id);
+    return {
+      id: it.id,
+      name: lootBasename(it.id),
+      path: it.path || it.id,
+      rarity: it.rarity || 'common',
+      klass: it.klass || 'relic',
+      level: it.level || 1,
+      sessions: it.sessionCount || 0,
+      discoverers: (it.discoverers || []).length,
+      by: it.firstDiscoveredBy || '?',
+      live: !!it.live,
+      x: pos.x, y: pos.y,
+      phase: (hash32(it.id) % 628) / 100,
+      pulse: 0,
+    };
+  });
+  const legendary = loot.filter((l) => l.rarity === 'legendary').length;
+  document.getElementById('lt').textContent = loot.length;
+  const lgStat = document.getElementById('legendary-stat');
+  if (legendary > 0) { lgStat.style.display = ''; document.getElementById('lg').textContent = legendary; }
+  else { lgStat.style.display = 'none'; }
+}
+
+function drawLoot(dt) {
+  for (const l of loot) {
+    l.phase += dt * 2;
+    const col = RARITY_COLOR[l.rarity] || '#9ca3af';
+    const rank = RARITY_RANK[l.rarity] || 0;
+    const float = rank >= 3 ? Math.sin(l.phase) * 3 : Math.sin(l.phase * 0.5) * 1;
+    const gx = l.x, gy = l.y + float;
+
+    // ground shadow
+    ctx.fillStyle = 'rgba(0,0,0,.18)';
+    ctx.beginPath(); ctx.ellipse(l.x, l.y + 13, 9, 3, 0, 0, Math.PI * 2); ctx.fill();
+
+    // rarity aura — stronger for epic/legendary, throb when freshly touched
+    const glow = (rank >= 3 ? 0.45 : 0.22) + (l.pulse > 0 ? 0.4 * l.pulse : 0) + (rank >= 3 ? Math.sin(l.phase) * 0.08 : 0);
+    const grad = ctx.createRadialGradient(gx, gy, 1, gx, gy, 22);
+    grad.addColorStop(0, col + Math.round(Math.max(0, Math.min(1, glow)) * 255).toString(16).padStart(2, '0'));
+    grad.addColorStop(1, col + '00');
+    ctx.fillStyle = grad; ctx.beginPath(); ctx.arc(gx, gy, 22, 0, Math.PI * 2); ctx.fill();
+
+    // gem pedestal — a small diamond plate
+    ctx.save();
+    ctx.translate(gx, gy);
+    ctx.fillStyle = col;
+    ctx.globalAlpha = 0.9;
+    ctx.beginPath();
+    ctx.moveTo(0, -8); ctx.lineTo(9, 0); ctx.lineTo(0, 8); ctx.lineTo(-9, 0); ctx.closePath();
+    ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.strokeStyle = 'rgba(255,255,255,.5)'; ctx.lineWidth = 1; ctx.stroke();
+    ctx.restore();
+
+    // class glyph
+    ctx.font = '13px serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText(CLASS_GLYPH[l.klass] || '🗿', gx, gy - 0.5);
+    ctx.textBaseline = 'alphabetic';
+
+    // level badge for the notable relics
+    if (rank >= 2) {
+      ctx.font = 'bold 8px monospace'; ctx.textAlign = 'center';
+      ctx.fillStyle = col;
+      roundRect(ctx, gx + 5, gy - 13, 16, 9, 2); ctx.fill();
+      ctx.fillStyle = '#0b0b0d';
+      ctx.fillText('L' + l.level, gx + 13, gy - 6);
+    }
+
+    if (l.pulse > 0) l.pulse = Math.max(0, l.pulse - dt * 1.4);
+  }
+}
+
+function getLoot(x, y) {
+  for (let i = loot.length - 1; i >= 0; i--) {
+    if (Math.hypot(x - loot[i].x, y - loot[i].y) < 16) return loot[i];
+  }
+  return null;
+}
+
+function showLootTip(x, y, l) {
+  tip.style.display = 'block';
+  tip.style.left = Math.min(x + 15, W - 220) + 'px';
+  tip.style.top = Math.min(y - 50, H - 90) + 'px';
+  const col = RARITY_COLOR[l.rarity];
+  tip.innerHTML = `<b>${CLASS_GLYPH[l.klass] || ''} ${l.name}</b> <span style="color:${col}">L${l.level}</span><br>` +
+    `<span style="color:${col};text-transform:uppercase;font-size:9px;letter-spacing:.05em">${l.rarity}</span> · ${l.klass}<br>` +
+    `🧩 ${l.sessions} sessions · 👾 ${l.discoverers} throngs<br>⛏ first found by ${l.by}`;
+  clearTimeout(tip._t);
+  tip._t = setTimeout(() => tip.style.display = 'none', 3500);
+}
+
+// Working throngs "discover" nearby relics — a little sparkle of life.
+function lootProximity() {
+  for (const b of bots) {
+    if (b.status !== 'working') continue;
+    for (const l of loot) {
+      if (l.pulse > 0.2) continue;
+      if (Math.hypot(b.x - l.x, b.y - l.y) < 26) {
+        l.pulse = 1;
+        emits(l.x, l.y - 8, l.rarity === 'legendary' ? '✨' : '·');
+      }
+    }
+  }
+}
+
 // --- Game loop ---
 let last = performance.now();
 function loop() {
@@ -881,6 +1029,8 @@ function loop() {
   updateToasts(dt);
 
   drawConnections(); drawButterflies();
+  drawLoot(dt);
+  lootProximity();
   bots.sort((a, b) => a.y - b.y);
   for (const b of bots) { b.update(dt); b.draw(); }
   drawPollen();
@@ -905,7 +1055,9 @@ for (let i = 0; i < AGENT_SEEDS.length; i++) {
 
 // --- Listen for external notifications (from parent dashboard) ---
 window.addEventListener('message', (evt) => {
-  if (!evt.data || evt.data.type !== 'thronglet_notification') return;
+  if (!evt.data) return;
+  if (evt.data.type === 'thronglet_atlas') { ingestAtlas(evt.data.items); return; }
+  if (evt.data.type !== 'thronglet_notification') return;
   const { agentName } = evt.data;
   const bot = bots.find(b => b.name === agentName);
   if (bot) {

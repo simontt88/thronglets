@@ -1,4 +1,4 @@
-import { appendFileSync, readFileSync, writeFileSync, existsSync } from "fs";
+import { appendFileSync, readFileSync, writeFileSync, existsSync, mkdirSync } from "fs";
 import { join } from "path";
 import { EventEmitter } from "events";
 import type { AgentDef, BridgeConfig, RuntimeType, CommsMode, FleetTimeouts, ExternalConfig } from "../config.js";
@@ -124,6 +124,7 @@ export class FleetManager {
   private workingStartedAt = new Map<string, number>();
   private repliedToDispatcher = new Set<string>();
   private recentFailures = new Map<string, number[]>(); // agent -> recent failure timestamps (retry-storm guard)
+  private dispatcherToolRetries = 0; // depth guard for feeding failed fleet commands back to the dispatcher
 
   constructor(bus: FleetEventBus, config: FleetManagerConfig) {
     this.bus = bus;
@@ -346,6 +347,67 @@ export class FleetManager {
   private resolveWorkspace(alias: string): string | null {
     const ws = this.config.workspaces.find((w) => w.alias === alias);
     return ws?.path || null;
+  }
+
+  /**
+   * The runtime new throngs should use by default — the one the fleet actually
+   * runs, never the deprecated "cursor". Prefers the dispatcher's runtime, then
+   * the most common throng runtime, then falls back to native.
+   */
+  defaultRuntime(): RuntimeType {
+    const disp = this.agents.get(DISPATCHER_NAME);
+    if (disp) return disp.state.runtime as RuntimeType;
+    const counts = new Map<string, number>();
+    for (const [n, live] of this.agents) {
+      if (n === DISPATCHER_NAME) continue;
+      counts.set(live.state.runtime, (counts.get(live.state.runtime) || 0) + 1);
+    }
+    let best: string | undefined;
+    let bestN = 0;
+    for (const [r, c] of counts) if (c > bestN) { best = r; bestN = c; }
+    return (best as RuntimeType) || "native";
+  }
+
+  /**
+   * Fleet commands used to fail silently: the dispatcher would emit a marker,
+   * the result was logged and stripped, and it would tell the human "done" while
+   * nothing happened. This feeds failures back to the dispatcher so it can retry
+   * with valid params or escalate — and gives up (notifies the human) after a
+   * couple of rounds to avoid loops.
+   */
+  async onDispatcherToolResults(
+    agentName: string,
+    results: import("./tools.js").ToolCallResult[],
+    sender: MessageSender,
+  ): Promise<void> {
+    if (agentName !== DISPATCHER_NAME) return;
+    const errors = results.filter((r) => !r.ok);
+    if (errors.length === 0) {
+      this.dispatcherToolRetries = 0;
+      return;
+    }
+    // The follow-up we send is tagged "system"; don't recurse forever on it.
+    if (sender !== "user" && this.dispatcherToolRetries >= 2) {
+      this.emitUserNotification(
+        `⚠️ Fleet command kept failing: ${errors.map((e) => `${e.action} — ${e.text}`).join("; ").slice(0, 240)}`,
+        "critical",
+      );
+      this.dispatcherToolRetries = 0;
+      return;
+    }
+    this.dispatcherToolRetries = sender === "user" ? 1 : this.dispatcherToolRetries + 1;
+
+    const runtimes = this.defaultRuntime();
+    const workspaceList = this.config.workspaces.map((w) => w.alias).join(", ") || "(none)";
+    const msg =
+      `[system] Your fleet command(s) did NOT succeed — do not tell the human it's done:\n` +
+      errors.map((e) => `  • ${e.action}: ${e.text}`).join("\n") +
+      `\n\nFix the parameters and retry, or use fleet_notify_user to tell the human what's blocking. ` +
+      `Hatch with the fleet runtime "${runtimes}" (omit "runtime" to auto-pick). ` +
+      `Existing workspaces: ${workspaceList}. To hatch into a new one, fleet_workspace_add first (it creates the directory).`;
+    this.send(DISPATCHER_NAME, msg, "system" as MessageSender).catch((err) => {
+      console.warn(`[fleet] failed to feed tool results back to dispatcher: ${(err as Error).message?.slice(0, 60)}`);
+    });
   }
 
   private logToSession(agentName: string, sessionId: string, entry: Record<string, unknown>): void {
@@ -632,6 +694,7 @@ export class FleetManager {
             cwd: live.state.workspacePath,
             model: live.state.model,
             name: `fleet-${name}-${live.sessionId}`,
+            agentName: name,
           }),
           60_000,
           `${name} session creation`,
@@ -1019,6 +1082,14 @@ export class FleetManager {
   }
 
   addWorkspace(alias: string, path: string): string {
+    // Create the directory so a brand-new workspace can be hatched into
+    // immediately — otherwise the follow-up fleet_spawn would resolve a path
+    // that doesn't exist on disk.
+    try {
+      mkdirSync(path, { recursive: true });
+    } catch (err) {
+      return `Error: could not create workspace directory "${path}": ${(err as Error).message}`;
+    }
     const result = addWorkspaceToState(alias, path);
     if (!result.startsWith("Error")) {
       // Update in-memory workspace list
@@ -1120,6 +1191,7 @@ export class FleetManager {
             cwd: live.state.workspacePath,
             model: live.state.model,
             name: `ext-${agentName}-${ext.chatId.slice(-6)}`,
+            agentName,
           }),
           60_000,
           `${agentName} external session creation`,

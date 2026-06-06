@@ -109,7 +109,7 @@ export class ClaudeCodeRuntime implements Runtime {
       this.config,
       opts.cwd,
       model,
-      opts.name || "unknown",
+      opts.agentName || opts.name || "unknown",
     );
   }
 }
