@@ -214,6 +214,17 @@ async function main() {
   const gameEngine = new GameEngine(bus);
   fleet.setGameEngine(gameEngine);
 
+  // Artifact engine — turns tool-call telemetry into the workspace "atlas" of
+  // files-as-loot (rarity/level from how widely each file is used). Subscribes
+  // live, then replays persisted traces so the atlas is populated on boot.
+  const { ArtifactEngine } = await import("./fleet/artifact-engine.js");
+  const artifactEngine = new ArtifactEngine(bus, {
+    resolveWorkspace: (agent) => fleet.getAgent(agent)?.workspace || "unknown",
+  });
+  const replay = artifactEngine.ingestTraceDir(join(GLOBAL_CONFIG_DIR, "fleet", "traces"));
+  if (replay.calls > 0) console.log(`[atlas] replayed ${replay.calls} tool calls from ${replay.files} trace files`);
+  fleet.setArtifactEngine(artifactEngine);
+
   // Wire command router (handles all Telegram commands + @mentions + routing)
   const { getNotifyChatId } = setupCommandRouter({
     fleet, bus, transport, config, workspaces, version: VERSION,

@@ -118,6 +118,21 @@ export function createHttpApp(
     });
   });
 
+  // Artifact atlas — files-as-loot, ranked by how widely each is used.
+  // ?workspace=<alias> scopes to one realm; omit for all. ?limit caps the list.
+  app.get("/api/atlas", (req, res) => {
+    const atlas = fleet.getArtifactEngine();
+    if (!atlas) { res.json({ items: [], summary: {}, enabled: false }); return; }
+    const workspace = typeof req.query.workspace === "string" ? req.query.workspace : undefined;
+    const limit = Math.max(1, Math.min(500, Number(req.query.limit) || 200));
+    res.json({
+      items: atlas.getAtlas(workspace).slice(0, limit),
+      summary: atlas.getSummary(),
+      workspaces: atlas.workspaces(),
+      enabled: true,
+    });
+  });
+
   app.get("/api/agents/:name", (req, res) => {
     const agent = fleet.getAgent(req.params.name);
     if (!agent) {
