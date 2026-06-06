@@ -77,6 +77,37 @@ export interface GameStats {
   mood: "idle" | "thinking" | "working" | "stuck" | "triumphant" | "exhausted";
 }
 
+// Artifact atlas — files-as-loot (from gateway tool-call telemetry)
+export type Rarity = "common" | "uncommon" | "rare" | "epic" | "legendary";
+export type ArtifactClass = "tome" | "rune" | "crystal" | "tool" | "relic";
+
+export interface AtlasItem {
+  id: string;
+  path: string;
+  workspace: string;
+  klass: ArtifactClass;
+  rarity: Rarity;
+  level: number;
+  score: number;
+  read: number;
+  edit: number;
+  create: number;
+  search: number;
+  sessionCount: number;
+  discoverers: string[];
+  firstDiscoveredBy: string;
+  firstSeen: string;
+  lastSeen: string;
+  live: boolean;
+}
+
+export interface AtlasSummary {
+  artifacts: number;
+  sessions: number;
+  legendary: number;
+  live: number;
+}
+
 interface FleetStore {
   agents: AgentState[];
   workspaces: WorkspaceEntry[];
@@ -96,6 +127,13 @@ interface FleetStore {
   gameStats: Record<string, GameStats>;
   activityOpen: boolean;
   toggleActivity: () => void;
+
+  // Artifact atlas (files-as-loot)
+  atlas: AtlasItem[];
+  atlasSummary: Record<string, AtlasSummary>;
+  atlasWorkspaces: string[];
+  atlasOpen: boolean;
+  toggleAtlas: () => void;
 
   // Per-card session viewing
   viewingSession: Record<string, string>; // agentName → sessionId being viewed
@@ -157,6 +195,15 @@ export const useFleetStore = create<FleetStore>((set, get) => ({
   gameStats: {},
   activityOpen: true,
   toggleActivity: () => set((s) => ({ activityOpen: !s.activityOpen })),
+  atlas: [],
+  atlasSummary: {},
+  atlasWorkspaces: [],
+  atlasOpen: false,
+  toggleAtlas: () => {
+    const next = !get().atlasOpen;
+    set({ atlasOpen: next });
+    if (next) fetchAtlas();
+  },
   viewingSession: {},
   sessionLists: {},
   sessionEvents: {},
@@ -421,6 +468,19 @@ export async function fetchGame() {
     const res = await fetch(`${serverBase.http}/api/game`);
     const data = await res.json();
     useFleetStore.setState({ gameStats: data.stats || {} });
+  } catch {}
+}
+
+export async function fetchAtlas(workspace?: string) {
+  try {
+    const q = workspace && workspace !== "all" ? `?workspace=${encodeURIComponent(workspace)}` : "";
+    const res = await fetch(`${serverBase.http}/api/atlas${q}`);
+    const data = await res.json();
+    useFleetStore.setState({
+      atlas: data.items || [],
+      atlasSummary: data.summary || {},
+      atlasWorkspaces: data.workspaces || [],
+    });
   } catch {}
 }
 
