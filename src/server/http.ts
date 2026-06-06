@@ -29,7 +29,12 @@ function isLoopbackOrigin(origin: string): boolean {
 
 function isOriginAllowed(origin: string | undefined): boolean {
   if (!origin) return true;
-  return isLoopbackOrigin(origin) || EXTRA_ALLOWED_ORIGINS.has(origin);
+  if (isLoopbackOrigin(origin) || EXTRA_ALLOWED_ORIGINS.has(origin)) return true;
+  try {
+    const host = new URL(origin).hostname;
+    if (host.endsWith(".ngrok.app") || host.endsWith(".ngrok-free.app")) return true;
+  } catch {}
+  return false;
 }
 
 function isMediaPathAllowed(filePath: string, fleet: FleetManager): boolean {
@@ -64,7 +69,9 @@ export function createHttpApp(
 
   app.use((req, res, next) => {
     const origin = req.header("Origin");
-    const allowed = isOriginAllowed(origin);
+    const p = req.path;
+    const isStaticAsset = p === "/" || p.startsWith("/assets/") || p.startsWith("/chill/") || p.endsWith(".html");
+    const allowed = isOriginAllowed(origin) || isStaticAsset;
     if (origin && allowed) {
       res.header("Access-Control-Allow-Origin", origin);
       res.header("Vary", "Origin");
