@@ -8,8 +8,9 @@
  * workspace and returns a normalized { ok, content } result.
  */
 
-import { promises as fs } from "fs";
+import { promises as fs, readFileSync } from "fs";
 import { dirname, isAbsolute, join } from "path";
+import { homedir } from "os";
 import { exec } from "child_process";
 
 export interface NativeTool {
@@ -58,6 +59,84 @@ function runShell(command: string, cwd: string, timeoutMs = BASH_TIMEOUT_MS): Pr
     });
   });
 }
+
+// ─── VibeSync session history (cloud) ─────────────────────────────────────────
+// Lets a throng query the user's past coding sessions — the data lives in the
+// vibespace cloud, not the local fs, so these are the only way to reach it.
+
+function vibesyncCreds(): { key: string; base: string } | undefined {
+  let key = process.env.VIBESYNC_API_KEY;
+  let base = "https://vibespace-five.vercel.app";
+  if (!key) {
+    try {
+      const c = JSON.parse(readFileSync(join(homedir(), ".vibesync", "config.json"), "utf8"));
+      key = c.apiKey;
+      if (c.backendUrl) base = c.backendUrl;
+    } catch { /* no local config */ }
+  }
+  return key ? { key, base } : undefined;
+}
+
+async function vibesyncFetch(path: string, init: RequestInit = {}): Promise<ToolResult> {
+  const creds = vibesyncCreds();
+  if (!creds) return { ok: false, content: "VibeSync not configured — set VIBESYNC_API_KEY or ~/.vibesync/config.json" };
+  try {
+    const r = await fetch(creds.base + path, {
+      ...init,
+      headers: { Authorization: `Bearer ${creds.key}`, "content-type": "application/json", ...(init.headers || {}) },
+    });
+    const text = await r.text();
+    if (!r.ok) return { ok: false, content: `vibesync ${r.status}: ${text.slice(0, 300)}` };
+    return { ok: true, content: truncate(text) };
+  } catch (e) {
+    return { ok: false, content: `vibesync error: ${(e as Error).message}` };
+  }
+}
+
+const SESSION_TOOLS: NativeTool[] = [
+  {
+    name: "recall_sessions",
+    description: "Search the user's past coding sessions (VibeSync history) by keyword or natural language. Use this for ANY task about past work, search history, or session/token cost analysis — the data is in the cloud, not on disk.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Search terms (keywords or natural language)." },
+        limit: { type: "string", description: "Max results, 1-50 (default 10)." },
+        workspace_id: { type: "string", description: "Optional workspace filter (slug, from list_session_workspaces)." },
+      },
+      required: ["query"],
+    },
+    async run(input) {
+      const body: Record<string, unknown> = { query: String(input.query || ""), limit: Number(input.limit || 10) };
+      if (input.workspace_id) body.workspace_id = String(input.workspace_id);
+      return vibesyncFetch("/api/sync/recall", { method: "POST", body: JSON.stringify(body) });
+    },
+  },
+  {
+    name: "list_session_workspaces",
+    description: "List the user's VibeSync workspaces with session/event counts. Use to pick which workspace to analyze.",
+    parameters: { type: "object", properties: {}, required: [] },
+    async run() {
+      return vibesyncFetch("/api/sync/workspaces");
+    },
+  },
+  {
+    name: "get_session",
+    description: "Fetch a past session's events (ordered, paginated) by id — reconstruct a task's full flow, including the search/exploration phase.",
+    parameters: {
+      type: "object",
+      properties: {
+        session_id: { type: "string", description: "Session id (from recall_sessions results)." },
+        page: { type: "string", description: "Page number, default 0 (100 events/page)." },
+      },
+      required: ["session_id"],
+    },
+    async run(input) {
+      const id = encodeURIComponent(String(input.session_id || ""));
+      return vibesyncFetch(`/api/sync/sessions/${id}?limit=100&page=${Number(input.page || 0)}`);
+    },
+  },
+];
 
 export const NATIVE_TOOLS: NativeTool[] = [
   {
@@ -194,6 +273,9 @@ export const NATIVE_TOOLS: NativeTool[] = [
   },
 ];
 
+// Session-history tools are appended so every native throng can reach past work.
+NATIVE_TOOLS.push(...SESSION_TOOLS);
+
 export const TOOLS_BY_NAME: Record<string, NativeTool> = Object.fromEntries(
   NATIVE_TOOLS.map((t) => [t.name, t]),
 );
@@ -213,6 +295,12 @@ export function summarizeToolCall(name: string, input: Record<string, unknown>):
       return `🔍 ${input.pattern || "?"}`;
     case "run_bash":
       return `▶️ ${String(input.command || "").split("\n")[0].slice(0, 60)}`;
+    case "recall_sessions":
+      return `🔎 recall: ${input.query || "?"}`;
+    case "list_session_workspaces":
+      return `🗂 workspaces`;
+    case "get_session":
+      return `📜 ${String(input.session_id || "?").slice(0, 12)}`;
     default:
       return `🔧 ${name}`;
   }

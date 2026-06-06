@@ -84,6 +84,33 @@ describe("native tools — shell & search", () => {
   });
 });
 
+describe("native tools — VibeSync session history", () => {
+  it("registers recall/workspaces/get_session tools with valid schemas", () => {
+    for (const name of ["recall_sessions", "list_session_workspaces", "get_session"]) {
+      const t = TOOLS_BY_NAME[name];
+      expect(t, name).toBeTruthy();
+      expect(t.parameters.type).toBe("object");
+    }
+    expect(TOOLS_BY_NAME["recall_sessions"].parameters.required).toContain("query");
+    expect(TOOLS_BY_NAME["get_session"].parameters.required).toContain("session_id");
+  });
+
+  it("errors gracefully when VibeSync has no credentials", async () => {
+    const saved = process.env.VIBESYNC_API_KEY;
+    const home = process.env.HOME;
+    process.env.VIBESYNC_API_KEY = "";
+    process.env.HOME = "/nonexistent-home-for-test"; // so the config.json fallback misses
+    try {
+      const r = await TOOLS_BY_NAME["list_session_workspaces"].run({}, process.cwd());
+      expect(r.ok).toBe(false);
+      expect(r.content).toMatch(/not configured/i);
+    } finally {
+      if (saved === undefined) delete process.env.VIBESYNC_API_KEY; else process.env.VIBESYNC_API_KEY = saved;
+      if (home === undefined) delete process.env.HOME; else process.env.HOME = home;
+    }
+  });
+});
+
 describe("summarizeToolCall", () => {
   it("renders compact summaries per tool", () => {
     expect(summarizeToolCall("read_file", { path: "a.ts" })).toBe("📖 a.ts");
