@@ -381,6 +381,25 @@ export class FleetManager {
     sender: MessageSender,
   ): Promise<void> {
     if (agentName !== DISPATCHER_NAME) return;
+
+    // A freshly hatched throng is idle until tasked, and the dispatcher can't name
+    // it in the same reply (the name is auto-assigned). Feed each spawn success
+    // back so it assigns the first task now instead of leaving the throng waiting.
+    // The reply to this is fleet_send (not fleet_spawn), so it can't loop.
+    for (const r of results) {
+      if (!r.ok || r.action !== "fleet_spawn") continue;
+      const m = r.text.match(/Agent "([^"]+)" spawned/);
+      if (!m) continue;
+      const newName = m[1];
+      const note =
+        `[system] ✅ Hatched @${newName} — it is IDLE and waiting. Give it its FIRST concrete task NOW: ` +
+        `[FLEET:fleet_send:{"agent":"${newName}","text":"<first step>"}], and optionally [FLEET:fleet_set_title:{"name":"${newName}","title":"<role>"}]. ` +
+        `Do NOT spawn again. This is the action that makes it start working.`;
+      this.send(DISPATCHER_NAME, note, "system" as MessageSender).catch((err) => {
+        console.warn(`[fleet] failed to prompt first task for ${newName}: ${(err as Error).message?.slice(0, 60)}`);
+      });
+    }
+
     const errors = results.filter((r) => !r.ok);
     if (errors.length === 0) {
       this.dispatcherToolRetries = 0;

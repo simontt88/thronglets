@@ -331,6 +331,21 @@ describe("FleetManager", () => {
       );
       expect(events.filter((e) => e.type === "user_message")).toHaveLength(0);
     });
+
+    it("prompts the dispatcher to task a freshly hatched throng (spawn success)", async () => {
+      await fleet.spawn("_dispatcher", "native", "ws1");
+      events.length = 0;
+      await fleet.onDispatcherToolResults(
+        "_dispatcher",
+        [{ action: "fleet_spawn", text: 'Agent "Qusxi" spawned (native · gpt-4o-mini · multi-agent-lab)', ok: true }],
+        "user",
+      );
+      const back = events.filter((e) => e.type === "user_message" && e.agentName === "_dispatcher");
+      expect(back.length).toBeGreaterThan(0);
+      const payload = JSON.stringify(back[back.length - 1].payload);
+      expect(payload).toContain("Qusxi");
+      expect(payload).toContain("first task".toUpperCase().slice(0, 5)); // "FIRST"
+    });
   });
 
   describe("timeouts", () => {
