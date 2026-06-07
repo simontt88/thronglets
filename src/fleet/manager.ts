@@ -1298,12 +1298,13 @@ export class FleetManager {
         }
       }
 
-      const agentDef = this.config.getAgentDef(agentState.runtime as RuntimeType);
+      // Honor the model that was last chosen at runtime (e.g. picked on the
+      // dashboard via /api/fleet/change) so it survives restarts. Fall back to
+      // the config/agent default only when nothing was persisted (first boot).
+      const resolvedModel = agentState.model || this.config.getAgentDef(agentState.runtime as RuntimeType).model;
+      const agentDef = this.config.getAgentDef(agentState.runtime as RuntimeType, resolvedModel);
       const runtimeInstance = this.config.createRuntime(agentDef);
-
-      // Use the config's model, not the saved one (which could be stale or from tests)
-      const resolvedModel = agentDef.model || agentState.model;
-      if (agentState.model !== resolvedModel) {
+      if (agentState.model && agentState.model !== resolvedModel) {
         console.log(`[fleet] "${name}" model updated: ${agentState.model} → ${resolvedModel}`);
       }
 

@@ -48,11 +48,17 @@ export function CardMenu({ agent, x, y, accent, onClose }: Props) {
   };
 
   const isDispatcher = agent.name === "_dispatcher";
-  const models = RUNTIME_MODELS[agent.runtime] || [];
+  const presetModels = RUNTIME_MODELS[agent.runtime] || [];
+  // Always surface the model the agent is actually on, even if it's not a preset
+  // (e.g. a dated variant or one set directly in config).
+  const modelOptions = presetModels.includes(agent.model)
+    ? presetModels
+    : [agent.model, ...presetModels];
 
   return (
     <div ref={ref} className="menu" style={{ left: x, top: y }} onMouseDown={(e) => e.stopPropagation()}>
-      {/* Runtime / Model section */}
+      {/* Runtime — not for the dispatcher: only the native runtime has an API
+          key configured, so switching it would break the orchestrator. */}
       {!isDispatcher && (
         <>
           <div className="menu-section-label">Runtime</div>
@@ -75,31 +81,32 @@ export function CardMenu({ agent, x, y, accent, onClose }: Props) {
               ))}
             </div>
           )}
-
-          <div className="menu-section-label">Model</div>
-          <button className="menu-item" onClick={() => { setShowModelPicker(!showModelPicker); setShowRuntimePicker(false); }}>
-            <span className="mi-ico"><Icon name="cpu" size={13} /></span>
-            <span className="mi-model-name">{agent.model}</span>
-            <span className="mi-chevron">▸</span>
-          </button>
-          {showModelPicker && (
-            <div className="menu-sub">
-              {models.map((m) => (
-                <button
-                  key={m}
-                  className={"menu-sub-item" + (m === agent.model ? " active" : "")}
-                  onClick={() => handleModelChange(m)}
-                >
-                  {m}
-                  {m === agent.model && <span className="mi-check">✓</span>}
-                </button>
-              ))}
-            </div>
-          )}
-
-          <div className="menu-divider"></div>
         </>
       )}
+
+      {/* Model — available for every agent, including the dispatcher. */}
+      <div className="menu-section-label">Model</div>
+      <button className="menu-item" onClick={() => { setShowModelPicker(!showModelPicker); setShowRuntimePicker(false); }}>
+        <span className="mi-ico"><Icon name="cpu" size={13} /></span>
+        <span className="mi-model-name">{agent.model}</span>
+        <span className="mi-chevron">▸</span>
+      </button>
+      {showModelPicker && (
+        <div className="menu-sub">
+          {modelOptions.map((m) => (
+            <button
+              key={m}
+              className={"menu-sub-item" + (m === agent.model ? " active" : "")}
+              onClick={() => handleModelChange(m)}
+            >
+              {m}
+              {m === agent.model && <span className="mi-check">✓</span>}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <div className="menu-divider"></div>
 
       <div className="menu-section-label">Accent color</div>
       <div className="menu-colors">
