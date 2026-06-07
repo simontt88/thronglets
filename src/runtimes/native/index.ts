@@ -9,6 +9,7 @@
 
 import type { Runtime, AgentSession, RuntimeSessionOptions } from "../interface.js";
 import type { ApiProvider } from "../../gateway/models.js";
+import { GovernanceManager } from "../../gateway/governance.js";
 import { AgentLoop, type BusLike } from "./agent-loop.js";
 
 export interface NativeRuntimeConfig {
@@ -21,6 +22,12 @@ export interface NativeRuntimeConfig {
   /** Fleet bus — native publishes tool_call/tool_result/usage/model_switch here. */
   bus?: BusLike;
   maxSteps?: number;
+  /**
+   * Token-gateway base (e.g. http://127.0.0.1:3847/gateway). When set, native
+   * routes through the gateway with a virtual key instead of holding the real
+   * provider key, and defers telemetry to the gateway to avoid double-counting.
+   */
+  gatewayUrl?: string;
 }
 
 const DEFAULT_BASE: Record<ApiProvider, string> = {
@@ -74,33 +81,45 @@ export class NativeRuntime implements Runtime {
   async createSession(opts: RuntimeSessionOptions): Promise<AgentSession> {
     const model = opts.model || this.config.model || "gpt-4o-mini";
     const provider = inferProvider(model, this.config.provider);
-    const apiKey =
-      this.config.apiKey ||
-      (provider === "anthropic" ? process.env.ANTHROPIC_API_KEY : process.env.OPENAI_API_KEY) ||
-      "";
+    const throng = opts.agentName || opts.name || "native";
+    const useGateway = !!this.config.gatewayUrl;
+
+    // Through the gateway: present a virtual key (real key stays in the gateway)
+    // and target the provider-specific mount. Otherwise hit the provider directly.
+    const apiKey = useGateway
+      ? GovernanceManager.vkFor(throng)
+      : (this.config.apiKey ||
+         (provider === "anthropic" ? process.env.ANTHROPIC_API_KEY : process.env.OPENAI_API_KEY) ||
+         "");
 
     if (!apiKey) {
       throw new Error(`[native] no API key for ${provider} — set it in config or ${provider === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"}`);
     }
+
+    const baseUrl = useGateway
+      ? (provider === "openai" ? `${this.config.gatewayUrl}/openai` : this.config.gatewayUrl!)
+      : (this.config.baseUrl || DEFAULT_BASE[provider]);
 
     const systemPrompt = opts.context ? `${BASE_SYSTEM_PROMPT}\n\n${opts.context}` : BASE_SYSTEM_PROMPT;
     const session = opts.name ? `native-${opts.name}-${Date.now().toString(36)}` : `native-${Date.now().toString(36)}`;
 
     const loop = new AgentLoop({
       // Attribute telemetry to the throng's display name, not the session label.
-      agent: opts.agentName || opts.name || "native",
+      agent: throng,
       session,
       provider,
       apiKey,
-      baseUrl: this.config.baseUrl || DEFAULT_BASE[provider],
+      baseUrl,
       model,
       cwd: opts.cwd,
       systemPrompt,
-      bus: this.config.bus,
+      // Through the gateway, the gateway is the single telemetry source — don't
+      // also emit from the loop or usage/tool-calls would be double-counted.
+      bus: useGateway ? undefined : this.config.bus,
       maxSteps: this.config.maxSteps,
     });
 
-    console.log(`[native] session ready — ${opts.name || "native"} on ${provider}/${model} (self-hosted loop, no SDK)`);
+    console.log(`[native] session ready — ${throng} on ${provider}/${model} ${useGateway ? `via token gateway (${apiKey})` : "(direct, self-hosted loop)"}`);
     return new NativeSession(loop);
   }
 }

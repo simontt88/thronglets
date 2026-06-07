@@ -4,6 +4,7 @@ import { directiveStore } from "./directives.js";
 import { resolveModel, type ApiProvider } from "./models.js";
 import { StreamAccumulator } from "./sse.js";
 import { computeCost, persistTrace, type ThrongTrace, type UsageInfo } from "./trace.js";
+import { GovernanceManager } from "./governance.js";
 
 export interface ToolCall {
   id: string;
@@ -96,9 +97,17 @@ function parseOpenAIToolCalls(choices: unknown[]): ToolCall[] {
 
 interface GatewayConfig {
   provider: ApiProvider;
-  apiKey: string;
+  /** Static upstream key — used when no governance layer supplies one. */
+  apiKey?: string;
   baseUrl: string;
   apiVersion?: string;
+  /** When present, governs virtual-key auth, budgets, and provider-key routing. */
+  governance?: GovernanceManager;
+}
+
+/** A retryable upstream status warrants trying the next provider key. */
+function isRetryable(status: number): boolean {
+  return status === 429 || status >= 500;
 }
 
 /** Minimal structural type for the upstream fetch Response (avoids express.Response name clash). */
@@ -173,21 +182,31 @@ class ApiGateway {
     }
   }
 
-  private buildHeaders(reqHeaders: Request["headers"]): Record<string, string> {
+  private buildHeaders(reqHeaders: Request["headers"], apiKey: string): Record<string, string> {
     const h: Record<string, string> = { "content-type": "application/json" };
 
     if (this.cfg.provider === "anthropic") {
-      h["x-api-key"] = this.cfg.apiKey;
+      h["x-api-key"] = apiKey;
       h["anthropic-version"] = this.cfg.apiVersion || "2023-06-01";
       const beta = reqHeaders["anthropic-beta"];
       if (beta) h["anthropic-beta"] = String(beta);
     } else {
-      h["authorization"] = `Bearer ${this.cfg.apiKey}`;
+      h["authorization"] = `Bearer ${apiKey}`;
       const orgId = reqHeaders["openai-organization"];
       if (orgId) h["openai-organization"] = String(orgId);
     }
 
     return h;
+  }
+
+  /** Force the request onto the cheapest tier (used when a VK is over budget). */
+  private applyDowngrade(body: Record<string, unknown>): void {
+    const target = resolveModel(this.cfg.provider, "small");
+    const from = body.model as string | undefined;
+    if (!target || target === from) return;
+    body.model = target;
+    this.bus.publish("model_switch", this.agentName, this.sessionId, { from, to: target, tier: "small" });
+    console.log(`[gateway/${this.cfg.provider}] ${this.agentName} downgraded (budget) → ${target}`);
   }
 
   /**
@@ -247,6 +266,23 @@ class ApiGateway {
     let body = req.body as Record<string, unknown>;
     const isPost = req.method === "POST" && body && typeof body === "object";
 
+    // ── Governance gate: virtual-key budget / rate / provider checks ────────────
+    const gov = this.cfg.governance;
+    if (gov?.enabled) {
+      const auth = gov.authorize(this.agentName, this.cfg.provider);
+      if (!auth.allow) {
+        console.log(`[gateway/${this.cfg.provider}] BLOCKED ${this.agentName}: ${auth.reason}`);
+        this.emit("error", { error: { type: "budget", message: auth.reason || "blocked" } });
+        res.status(auth.status || 402).json({
+          type: "error",
+          error: { type: "gateway_governance", message: auth.reason || "request blocked by token gateway" },
+        });
+        return;
+      }
+      gov.noteRequest(this.agentName);
+      if (auth.downgradeTier && isPost) this.applyDowngrade(body);
+    }
+
     if (isPost) {
       this.stripMarker(body);
       this.emitToolResultsFromRequest(body);     // outcomes of prior tool calls
@@ -254,30 +290,55 @@ class ApiGateway {
       this.ensureUsageReporting(body);
     }
 
+    // Provider keys to try, in order (governance load-balances + fails over).
+    const keys = gov?.enabled ? gov.providerKeys(this.cfg.provider) : (this.cfg.apiKey ? [this.cfg.apiKey] : []);
+    if (keys.length === 0) {
+      this.emit("error", { error: { type: "config", message: `no upstream key for ${this.cfg.provider}` } });
+      res.status(502).json({ type: "error", error: { type: "gateway_config", message: `no upstream key configured for ${this.cfg.provider}` } });
+      return;
+    }
+
     const wantsStream = isPost && body.stream === true;
     const startedAt = Date.now();
+    const payload = req.method !== "GET" ? JSON.stringify(body) : undefined;
 
-    try {
-      const upstream = await fetch(url, {
-        method: req.method,
-        headers: this.buildHeaders(req.headers),
-        body: req.method !== "GET" ? JSON.stringify(body) : undefined,
-      });
+    let lastErr: string | undefined;
+    for (let i = 0; i < keys.length; i++) {
+      try {
+        const upstream = await fetch(url, {
+          method: req.method,
+          headers: this.buildHeaders(req.headers, keys[i]),
+          body: payload,
+        });
 
-      if (wantsStream && upstream.body) {
-        await this.pipeStream(upstream, res, startedAt);
-      } else {
-        await this.handleJson(upstream, req, res, startedAt);
+        // Failover: retry the next key on a transient upstream error.
+        if (isRetryable(upstream.status) && i < keys.length - 1) {
+          console.warn(`[gateway/${this.cfg.provider}] ${this.agentName} key#${i} → ${upstream.status}, failing over`);
+          lastErr = `upstream ${upstream.status}`;
+          continue;
+        }
+
+        if (wantsStream && upstream.body) {
+          await this.pipeStream(upstream, res, startedAt);
+        } else {
+          await this.handleJson(upstream, req, res, startedAt);
+        }
+        return;
+      } catch (err) {
+        lastErr = err instanceof Error ? err.message : String(err);
+        if (i < keys.length - 1) {
+          console.warn(`[gateway/${this.cfg.provider}] ${this.agentName} key#${i} threw (${lastErr}), failing over`);
+          continue;
+        }
       }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.error(`[gateway/${this.cfg.provider}] proxy error for ${this.agentName}: ${msg}`);
-      this.emit("error", { error: { type: "gateway_error", message: msg } });
-      if (!res.headersSent) {
-        res.status(502).json({ type: "error", error: { type: "gateway_error", message: msg } });
-      } else {
-        res.end();
-      }
+    }
+
+    console.error(`[gateway/${this.cfg.provider}] proxy error for ${this.agentName}: ${lastErr}`);
+    this.emit("error", { error: { type: "gateway_error", message: lastErr || "upstream failed" } });
+    if (!res.headersSent) {
+      res.status(502).json({ type: "error", error: { type: "gateway_error", message: lastErr || "upstream failed" } });
+    } else {
+      res.end();
     }
   }
 
@@ -377,37 +438,44 @@ function extractAgent(body: Record<string, unknown>): { agentName: string; sessi
 
 // ─── Router factories ─────────────────────────────────────────────────────────
 
+/** Pull a `vk-…` virtual key out of the inbound auth headers, if present. */
+function vkFromHeaders(req: Request): string | undefined {
+  const auth = req.headers.authorization || (req.headers["x-api-key"] as string | undefined);
+  return GovernanceManager.agentFromVk(typeof auth === "string" ? auth : undefined);
+}
+
 function makeRouter(cfg: GatewayConfig, bus: FleetEventBus): express.Router {
   const router = express.Router();
-  const gateways = new Map<string, ApiGateway>();
 
   router.all(/.*/, async (req, res) => {
-    const { agentName, sessionId } = extractAgent(req.body as Record<string, unknown>);
+    // Consumer identity: the virtual key wins (native/self-hosted path), else the
+    // [GATEWAY_AGENT:…] marker (SDK runtimes that can't set a VK header).
+    const fromVk = cfg.governance ? vkFromHeaders(req) : undefined;
+    const { agentName: fromMarker, sessionId } = extractAgent(req.body as Record<string, unknown>);
+    const agentName = fromVk || fromMarker;
 
-    if (!gateways.has(agentName)) {
-      gateways.set(agentName, new ApiGateway(cfg, bus, agentName, sessionId));
-    }
-
-    await gateways.get(agentName)!.handle(req, res);
+    await new ApiGateway(cfg, bus, agentName, sessionId).handle(req, res);
   });
 
   return router;
 }
 
-export function createAnthropicGatewayRouter(bus: FleetEventBus, apiKey: string): express.Router {
+export function createAnthropicGatewayRouter(bus: FleetEventBus, apiKey?: string, governance?: GovernanceManager): express.Router {
   return makeRouter({
     provider: "anthropic",
     apiKey,
     baseUrl: "https://api.anthropic.com/v1",
     apiVersion: "2023-06-01",
+    governance,
   }, bus);
 }
 
-export function createOpenAIGatewayRouter(bus: FleetEventBus, apiKey: string): express.Router {
+export function createOpenAIGatewayRouter(bus: FleetEventBus, apiKey?: string, governance?: GovernanceManager): express.Router {
   return makeRouter({
     provider: "openai",
     apiKey,
     baseUrl: "https://api.openai.com/v1",
+    governance,
   }, bus);
 }
 

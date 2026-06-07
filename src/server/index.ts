@@ -6,10 +6,12 @@ import express from "express";
 import { createHttpApp } from "./http.js";
 import { attachWebSocket } from "./ws.js";
 import { createAnthropicGatewayRouter, createOpenAIGatewayRouter } from "../gateway/proxy.js";
+import { GovernanceManager, buildGatewayPolicy } from "../gateway/governance.js";
 import type { FleetManager } from "../fleet/index.js";
 import type { FleetEventBus } from "../fleet/index.js";
 import type { BridgeConfig } from "../config.js";
 import type { WorkspaceEntry } from "../fleet/index.js";
+import type { UsageInfo } from "../gateway/trace.js";
 
 const DEFAULT_PORT = 3847;
 
@@ -46,18 +48,42 @@ export function createServerApp(
 ): express.Application {
   const app = createHttpApp(fleet, config);
 
-  // Mount API gateways for tool_use observation (enabled unless THRONGLETS_GATEWAY_ENABLED=false)
+  // ── Token gateway: virtual keys, budgets, provider routing + telemetry ───────
+  // Real provider keys live here; agents present a `vk-<name>` and never hold them.
   if (process.env.THRONGLETS_GATEWAY_ENABLED !== "false" && bus) {
-    const anthropicKey = config.agents.find((a) => a.runtime === "claude-code")?.apiKey;
-    if (anthropicKey) {
-      app.use("/gateway", createAnthropicGatewayRouter(bus, anthropicKey));
-      console.log(`[server] Gateway: Anthropic proxy at /gateway`);
-    }
+    // Provider keys: prefer the explicit gateway block, else fall back to the keys
+    // already on the agents so existing configs meter immediately (observe-only).
+    const openaiKey =
+      config.gateway?.providers?.openai?.keys[0] ||
+      config.agents.find((a) => a.runtime === "codex" || a.runtime === "native")?.apiKey;
+    const anthropicKey =
+      config.gateway?.providers?.anthropic?.keys[0] ||
+      config.agents.find((a) => a.runtime === "claude-code")?.apiKey;
 
-    const openaiKey = config.agents.find((a) => a.runtime === "codex")?.apiKey;
-    if (openaiKey) {
-      app.use("/gateway/openai", createOpenAIGatewayRouter(bus, openaiKey));
-      console.log(`[server] Gateway: OpenAI proxy at /gateway/openai`);
+    const policy = buildGatewayPolicy(config.gateway, { openai: openaiKey, anthropic: anthropicKey });
+    const governance = new GovernanceManager(policy);
+
+    if (governance.enabled) {
+      // Accrue spend from the single source of truth: the usage telemetry the
+      // proxy emits after each upstream call.
+      bus.onEvent((ev) => {
+        if (ev.type !== "usage") return;
+        const u = (ev.payload as { usage?: UsageInfo } | undefined)?.usage;
+        if (u) governance.recordUsage(ev.agentName, { inputTokens: u.inputTokens, outputTokens: u.outputTokens, costUsd: u.costUsd });
+      });
+
+      if (governance.hasProvider("anthropic")) {
+        app.use("/gateway", createAnthropicGatewayRouter(bus, anthropicKey, governance));
+        console.log(`[server] Token gateway: Anthropic proxy at /gateway`);
+      }
+      if (governance.hasProvider("openai")) {
+        app.use("/gateway/openai", createOpenAIGatewayRouter(bus, openaiKey, governance));
+        console.log(`[server] Token gateway: OpenAI proxy at /gateway/openai`);
+      }
+
+      // Observability: per-virtual-key budget + usage.
+      app.get("/gateway/stats", (_req, res) => res.json(governance.stats()));
+      console.log(`[server] Token gateway: stats at /gateway/stats (governance ${config.gateway?.enabled ? "on" : "observe-only"})`);
     }
   }
 
@@ -122,7 +148,7 @@ export function startServer(
   workspaces: WorkspaceEntry[],
 ): { port: number; server: import("http").Server } {
   const port = parseInt(process.env.BRIDGE_PORT || "") || DEFAULT_PORT;
-  const app = createServerApp(fleet, config);
+  const app = createServerApp(fleet, config, bus);
   const server = listenServer(app, fleet, bus, config, workspaces, port);
   return { port, server };
 }

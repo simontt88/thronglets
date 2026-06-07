@@ -132,7 +132,7 @@ function createTransport(cfg: BridgeConfig) {
   }
 }
 
-function createRuntime(agent: AgentDef, bus?: FleetEventBus): Runtime {
+function createRuntime(agent: AgentDef, bus?: FleetEventBus, gatewayUrl?: string): Runtime {
   switch (agent.runtime) {
     case "cursor":
       return new CursorRuntime({ apiKey: agent.apiKey, model: agent.model });
@@ -145,7 +145,8 @@ function createRuntime(agent: AgentDef, bus?: FleetEventBus): Runtime {
       return new CodexRuntime({ model: agent.model, apiKey: agent.apiKey, approvalPolicy: agent.approvalPolicy });
     case "native":
       // Phase F: self-hosted loop. Pass the bus so telemetry flows straight to dispatch + game.
-      return new NativeRuntime({ model: agent.model, apiKey: agent.apiKey, bus });
+      // When the token gateway is enabled, route through it with a virtual key instead.
+      return new NativeRuntime({ model: agent.model, apiKey: agent.apiKey, bus, gatewayUrl });
     default:
       console.error(`[fatal] unsupported runtime: ${agent.runtime}`);
       process.exit(1);
@@ -179,9 +180,15 @@ async function main() {
     workspaces.push({ alias: "cwd", path: config.workspace });
   }
 
+  // When the token gateway is enabled, native agents route through it (real keys
+  // stay server-side). It lives on the same process/port as the API.
+  const gatewayUrl = config.gateway?.enabled
+    ? `http://127.0.0.1:${process.env.BRIDGE_PORT || "3847"}/gateway`
+    : undefined;
+
   const fleet = new FleetManager(bus, {
     workspaces,
-    createRuntime: (agentDef: AgentDef) => createRuntime(agentDef, bus),
+    createRuntime: (agentDef: AgentDef) => createRuntime(agentDef, bus, gatewayUrl),
     ensureRulesSync: (agentDef: AgentDef) => ensureRulesSync(agentDef, config.workspace),
     getAgentDef: (runtime: RuntimeType, model?: string) => {
       const match = config.agents.find((a) => a.runtime === runtime);

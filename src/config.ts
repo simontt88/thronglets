@@ -105,6 +105,39 @@ export const DEFAULT_EXTERNAL: ExternalConfig = {
 /** Per-provider tier → model overrides. Partial; merges onto built-in defaults. */
 export type ModelTierOverrides = Partial<Record<"openai" | "anthropic", Partial<Record<"small" | "mid" | "large", string>>>>;
 
+// ─── Token gateway (governance) ─────────────────────────────────────────────────
+
+export type GatewayProviderName = "openai" | "anthropic";
+export type BudgetWindow = "daily" | "monthly" | "total";
+export type OnExceed = "block" | "downgrade";
+
+export interface GatewayBudget {
+  usd?: number;
+  tokens?: number;
+  window: BudgetWindow;
+}
+
+export interface GatewayVirtualKey {
+  /** Providers this VK may reach. Omit for all configured providers. */
+  providers?: GatewayProviderName[];
+  budget?: GatewayBudget;
+  /** What to do once the budget is spent. Default: block. */
+  onExceed: OnExceed;
+  /** Requests-per-minute cap. */
+  rpm?: number;
+}
+
+export interface GatewayProviderPool {
+  keys: string[];
+}
+
+export interface GatewayDef {
+  enabled: boolean;
+  providers?: Partial<Record<GatewayProviderName, GatewayProviderPool>>;
+  /** Keyed by agent name; "*" is the default policy for unlisted agents. */
+  virtualKeys?: Record<string, GatewayVirtualKey>;
+}
+
 export interface FleetConfig {
   comms: CommsMode;
   timeouts: FleetTimeouts;
@@ -140,6 +173,7 @@ export interface BridgeConfig {
   session?: SessionConfig;
   dispatcher?: DispatcherDef;
   fleet: FleetConfig;
+  gateway?: GatewayDef;
 }
 
 const LEGACY_DIRS = [".agent-bridge", ".kenyalang"];
@@ -213,6 +247,51 @@ function loadYamlFile(path: string): Record<string, unknown> | null {
   }
 }
 
+function parseGateway(raw: unknown): GatewayDef | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const g = raw as Record<string, unknown>;
+
+  const providers: GatewayDef["providers"] = {};
+  const rawProviders = g.providers as Record<string, unknown> | undefined;
+  if (rawProviders) {
+    for (const name of ["openai", "anthropic"] as GatewayProviderName[]) {
+      const pool = rawProviders[name] as Record<string, unknown> | undefined;
+      if (!pool) continue;
+      const keys = (pool.keys as unknown[] | undefined)?.map(String).filter(Boolean)
+        ?? (pool.key ? [String(pool.key)] : []);
+      if (keys.length) providers[name] = { keys };
+    }
+  }
+
+  const virtualKeys: Record<string, GatewayVirtualKey> = {};
+  const rawVks = (g.virtual_keys || g.virtualKeys) as Record<string, unknown> | undefined;
+  if (rawVks) {
+    for (const [agent, v] of Object.entries(rawVks)) {
+      const vk = (v || {}) as Record<string, unknown>;
+      const rawBudget = vk.budget as Record<string, unknown> | undefined;
+      const budget: GatewayBudget | undefined = rawBudget
+        ? {
+            usd: rawBudget.usd != null ? Number(rawBudget.usd) : undefined,
+            tokens: rawBudget.tokens != null ? Number(rawBudget.tokens) : undefined,
+            window: ((rawBudget.window as string) || "daily") as BudgetWindow,
+          }
+        : undefined;
+      virtualKeys[agent] = {
+        providers: (vk.providers as GatewayProviderName[] | undefined) || undefined,
+        budget,
+        onExceed: ((vk.on_exceed || vk.onExceed || "block") as OnExceed),
+        rpm: vk.rpm != null ? Number(vk.rpm) : undefined,
+      };
+    }
+  }
+
+  return {
+    enabled: g.enabled !== false,
+    providers,
+    virtualKeys,
+  };
+}
+
 function parseAgents(raw: unknown): AgentDef[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((a: Record<string, unknown>) => ({
@@ -262,6 +341,7 @@ export function loadConfig(): BridgeConfig {
   const rawFleet = resolved.fleet as Record<string, unknown> | undefined;
   const rawVisibility = rawFleet?.visibility as Record<string, unknown> | undefined;
   const rawTimeouts = rawFleet?.timeouts as Record<string, unknown> | undefined;
+  const gateway = parseGateway(resolved.gateway);
 
   const agents = parseAgents(resolved.agents);
 
@@ -369,6 +449,8 @@ export function loadConfig(): BridgeConfig {
       recallApi: (rawSession.recall_api || rawSession.recallApi) as string | undefined,
       recallKey: (rawSession.recall_key || rawSession.recallKey) as string | undefined,
     } : undefined,
+
+    gateway,
   };
 
   // Defaults

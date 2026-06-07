@@ -72,6 +72,26 @@ fleet:
   # File-ownership lock window (ms). Stops two throngs editing the same file at once.
   # lock_ttl_ms: 300000
 
+# ─── Token gateway (governance) ───
+# A real LLM gateway (Bifrost-inspired): the gateway holds the upstream provider
+# keys, and every agent reaches the model through a *virtual key* (`vk-<name>`)
+# — so no throng ever holds an `sk-…`. Per-VK budgets/rate-limits are metered and
+# enforced; provider keys load-balance and fail over. Stats at GET /gateway/stats.
+#
+# When `gateway.enabled: true`, native agents are automatically routed through it.
+# Omit the block entirely to keep today's behavior (direct provider calls).
+# gateway:
+#   enabled: true
+#   providers:
+#     openai:    { keys: ["${OPENAI_API_KEY}"] }   # one or more — extra keys = failover
+#     anthropic: { keys: ["${ANTHROPIC_API_KEY}"] }
+#   virtual_keys:
+#     # The dispatcher gets a generous budget and downgrades (not blocks) when spent.
+#     _dispatcher: { providers: [openai], budget: { usd: 5, window: daily }, on_exceed: downgrade }
+#     # Default for every other throng: hard daily cap + rate limit.
+#     "*":         { budget: { usd: 2, window: daily }, on_exceed: block, rpm: 60 }
+#   # budget windows: daily | monthly | total. on_exceed: block | downgrade.
+
 # Gateway: set THRONGLETS_GATEWAY_ENABLED=false to disable the API proxy entirely
 # (falls back to plain SDK calls — no telemetry, dispatch, or gamification).
 
