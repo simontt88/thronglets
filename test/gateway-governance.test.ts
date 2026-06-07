@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { tmpdir } from "os";
 import { join } from "path";
 import { GovernanceManager, buildGatewayPolicy, type GatewayPolicy } from "../src/gateway/governance.js";
+import { computeCost } from "../src/gateway/trace.js";
 
 function ledgerPath(): string {
   return join(tmpdir(), `gov-ledger-${Math.random().toString(36).slice(2)}.json`);
@@ -128,6 +129,27 @@ describe("GovernanceManager — stats & persistence", () => {
     const g2 = new GovernanceManager(policy({ Nova: { onExceed: "block", budget: { usd: 5, window: "total" } } }), path);
     const stats = g2.stats() as { virtualKeys: Record<string, { lifetimeCostUsd: number }> };
     expect(stats.virtualKeys["vk-Nova"].lifetimeCostUsd).toBeCloseTo(2, 6);
+  });
+});
+
+describe("pricing — budgets need a non-zero cost", () => {
+  it("prices the gpt-5 family (incl. dated + .x variants) above zero", () => {
+    expect(computeCost("gpt-5.1", 1_000_000, 1_000_000)).toBeGreaterThan(0);
+    expect(computeCost("gpt-5.1-2025-11-13", 1_000_000, 0)).toBeGreaterThan(0);
+    expect(computeCost("gpt-5.2", 0, 1_000_000)).toBeGreaterThan(0);
+  });
+
+  it("resolves the cheaper variant via longest-prefix match", () => {
+    const base = computeCost("gpt-5", 1_000_000, 1_000_000);
+    const mini = computeCost("gpt-5-mini", 1_000_000, 1_000_000);
+    const nano = computeCost("gpt-5-nano", 1_000_000, 1_000_000);
+    expect(mini).toBeLessThan(base);
+    expect(nano).toBeLessThan(mini);
+  });
+
+  it("prices o-series reasoning models", () => {
+    expect(computeCost("o4-mini", 1_000_000, 0)).toBeGreaterThan(0);
+    expect(computeCost("o3", 1_000_000, 0)).toBeGreaterThan(0);
   });
 });
 

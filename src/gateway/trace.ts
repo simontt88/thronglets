@@ -38,21 +38,41 @@ export interface ThrongTrace {
 
 interface Price { input: number; output: number; cached: number }
 
+// USD per 1M tokens. Approximate, prefix-matched, and meant to be in the right
+// ballpark for budgeting — not billing-exact. More-specific families are listed
+// before their base so prefix matching resolves the cheaper variant first.
 const PRICES: Record<string, Price> = {
-  // OpenAI
+  // OpenAI — GPT-4o
   "gpt-4o-mini": { input: 0.15, output: 0.6, cached: 0.075 },
   "gpt-4o": { input: 2.5, output: 10, cached: 1.25 },
+  // OpenAI — GPT-4.1
+  "gpt-4.1-nano": { input: 0.1, output: 0.4, cached: 0.025 },
+  "gpt-4.1-mini": { input: 0.4, output: 1.6, cached: 0.1 },
   "gpt-4.1": { input: 2.0, output: 8, cached: 0.5 },
+  // OpenAI — GPT-5 family (gpt-5.1 / 5.2 resolve to the base via prefix)
+  "gpt-5-nano": { input: 0.05, output: 0.4, cached: 0.005 },
+  "gpt-5-mini": { input: 0.25, output: 2, cached: 0.025 },
+  "gpt-5": { input: 1.25, output: 10, cached: 0.125 },
+  // OpenAI — o-series reasoning
+  "o4-mini": { input: 1.1, output: 4.4, cached: 0.275 },
+  "o3-mini": { input: 1.1, output: 4.4, cached: 0.55 },
+  "o3": { input: 2.0, output: 8, cached: 0.5 },
+  "o1-mini": { input: 1.1, output: 4.4, cached: 0.55 },
+  "o1": { input: 15, output: 60, cached: 7.5 },
   // Anthropic
   "claude-haiku-4-5": { input: 1.0, output: 5, cached: 0.1 },
   "claude-sonnet-4-6": { input: 3.0, output: 15, cached: 0.3 },
   "claude-opus-4-8": { input: 15, output: 75, cached: 1.5 },
 };
 
+// Longest keys first so a specific family (e.g. gpt-5-mini) wins over its base
+// (gpt-5) regardless of object insertion order.
+const PRICE_KEYS = Object.keys(PRICES).sort((a, b) => b.length - a.length);
+
 function priceFor(model: string): Price | undefined {
   if (PRICES[model]) return PRICES[model];
   // Prefix match (model ids often carry date suffixes, e.g. gpt-4o-2024-08-06)
-  for (const key of Object.keys(PRICES)) {
+  for (const key of PRICE_KEYS) {
     if (model.startsWith(key)) return PRICES[key];
   }
   return undefined;
