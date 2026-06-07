@@ -5,7 +5,7 @@ import { PixelThronglet } from "./PixelThronglet";
 import { generateThronglet } from "../lib/thronglet";
 
 export function TopBar() {
-  const { agents, workspaces, currentWorkspace, setWorkspace, theme, setTheme, toggleDispatcher, mode, setMode } = useFleetStore();
+  const { agents, workspaces, currentWorkspace, setWorkspace, theme, setTheme, toggleDispatcher, toggleAtlas, mode, setMode } = useFleetStore();
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState("");
   const [editingWs, setEditingWs] = useState<string | null>(null);
@@ -132,6 +132,13 @@ export function TopBar() {
       </div>
 
       <div className="topbar-right">
+        <button
+          className="icon-btn"
+          title="Artifact Atlas — files-as-loot"
+          onClick={() => toggleAtlas()}
+        >
+          🗺️
+        </button>
         <button
           className={"icon-btn mode-toggle" + (mode === "chill" ? " active" : "")}
           title={mode === "work" ? "Switch to Chill mode (Ctrl+.)" : "Switch to Work mode (Ctrl+.)"}

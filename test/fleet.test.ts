@@ -3,7 +3,7 @@ import { FleetManager, FleetEventBus, _setTestDir } from "../src/fleet/index.js"
 import type { FleetEvent, FleetActivityEvent } from "../src/fleet/index.js";
 import type { Runtime, AgentSession, RuntimeSessionOptions } from "../src/runtimes/interface.js";
 import type { RuntimeType } from "../src/config.js";
-import { mkdtempSync, rmSync } from "fs";
+import { mkdtempSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 
@@ -280,6 +280,71 @@ describe("FleetManager", () => {
       const ws = fleet.listWorkspaces();
       expect(ws).toHaveLength(2);
       expect(ws.map((w) => w.alias)).toEqual(["ws1", "ws2"]);
+    });
+
+    it("creates the directory when adding a brand-new workspace", () => {
+      const dir = join(testDir, "fresh-ws");
+      expect(existsSync(dir)).toBe(false);
+      const result = fleet.addWorkspace("fresh", dir);
+      expect(result).not.toMatch(/^Error/);
+      expect(existsSync(dir)).toBe(true);
+      // and it can immediately be hatched into
+      expect(fleet.listWorkspaces().some((w) => w.alias === "fresh")).toBe(true);
+    });
+  });
+
+  describe("defaultRuntime", () => {
+    it("falls back to native when no agents exist", () => {
+      expect(fleet.defaultRuntime()).toBe("native");
+    });
+
+    it("prefers the dispatcher's runtime once it exists", async () => {
+      await fleet.spawn("_dispatcher", "codex", "ws1");
+      expect(fleet.defaultRuntime()).toBe("codex");
+    });
+  });
+
+  describe("dispatcher tool-result feedback", () => {
+    it("feeds a failed fleet command back to the dispatcher instead of swallowing it", async () => {
+      await fleet.spawn("_dispatcher", "native", "ws1");
+      events.length = 0;
+      await fleet.onDispatcherToolResults(
+        "_dispatcher",
+        [{ action: "fleet_spawn", text: "No API key configured for runtime cursor.", ok: false }],
+        "user",
+      );
+      // a system message is routed back to the dispatcher so it can retry/escalate
+      const back = events.filter(
+        (e) => e.type === "user_message" && e.agentName === "_dispatcher",
+      );
+      expect(back.length).toBeGreaterThan(0);
+      expect(JSON.stringify(back[back.length - 1].payload)).toContain("did NOT succeed");
+    });
+
+    it("does nothing for a non-dispatcher agent", async () => {
+      await fleet.spawn("alpha", "native", "ws1");
+      events.length = 0;
+      await fleet.onDispatcherToolResults(
+        "alpha",
+        [{ action: "fleet_spawn", text: "error", ok: false }],
+        "user",
+      );
+      expect(events.filter((e) => e.type === "user_message")).toHaveLength(0);
+    });
+
+    it("prompts the dispatcher to task a freshly hatched throng (spawn success)", async () => {
+      await fleet.spawn("_dispatcher", "native", "ws1");
+      events.length = 0;
+      await fleet.onDispatcherToolResults(
+        "_dispatcher",
+        [{ action: "fleet_spawn", text: 'Agent "Qusxi" spawned (native · gpt-4o-mini · multi-agent-lab)', ok: true }],
+        "user",
+      );
+      const back = events.filter((e) => e.type === "user_message" && e.agentName === "_dispatcher");
+      expect(back.length).toBeGreaterThan(0);
+      const payload = JSON.stringify(back[back.length - 1].payload);
+      expect(payload).toContain("Qusxi");
+      expect(payload).toContain("first task".toUpperCase().slice(0, 5)); // "FIRST"
     });
   });
 

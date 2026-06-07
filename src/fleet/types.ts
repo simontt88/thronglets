@@ -12,6 +12,8 @@ export type FleetEventType =
   | "agent_thinking"
   | "tool_call"
   | "tool_result"
+  | "model_switch"
+  | "usage"
   | "agent_message"
   | "status_change"
   | "error";

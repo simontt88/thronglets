@@ -2,7 +2,10 @@ export interface RuntimeSessionOptions {
   cwd: string;
   model: string;
   context?: string;
+  /** Session label (used for trace file names / correlation). */
   name?: string;
+  /** Throng display name — what telemetry/activity feeds should attribute work to. */
+  agentName?: string;
 }
 
 export interface AgentSession {

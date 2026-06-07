@@ -7,7 +7,9 @@ import { MobileDispatcher } from "./components/MobileDispatcher";
 import { ChatBar } from "./components/ChatBar";
 import { CommandBar } from "./components/CommandBar";
 import { SpawnDialog } from "./components/SpawnDialog";
+import { Atlas } from "./components/Atlas";
 import { ChillMode } from "./components/ChillMode";
+import { ActivityTimeline } from "./components/ActivityTimeline";
 import { useKeyboard } from "./lib/useKeyboard";
 
 const mobileQuery = typeof window !== "undefined" ? window.matchMedia("(max-width: 768px)") : null;
@@ -67,8 +69,10 @@ export function App() {
         )}
       </div>
       {isMobile && <MobileDispatcher />}
+      {!isMobile && mode === "work" && <ActivityTimeline />}
       <CommandBar />
       <SpawnDialog />
+      <Atlas />
     </>
   );
 }

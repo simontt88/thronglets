@@ -6,6 +6,7 @@ import { TelegramTransport } from "./transports/telegram.js";
 import { CursorRuntime } from "./runtimes/cursor.js";
 import { ClaudeCodeRuntime } from "./runtimes/claude-code.js";
 import { CodexRuntime } from "./runtimes/codex.js";
+import { NativeRuntime } from "./runtimes/native/index.js";
 import { FleetManager, FleetEventBus } from "./fleet/index.js";
 import { loadWorkspaces as loadWorkspacesFromState } from "./fleet/state.js";
 import type { WorkspaceEntry } from "./fleet/index.js";
@@ -131,7 +132,7 @@ function createTransport(cfg: BridgeConfig) {
   }
 }
 
-function createRuntime(agent: AgentDef): Runtime {
+function createRuntime(agent: AgentDef, bus?: FleetEventBus, gatewayUrl?: string): Runtime {
   switch (agent.runtime) {
     case "cursor":
       return new CursorRuntime({ apiKey: agent.apiKey, model: agent.model });
@@ -142,6 +143,10 @@ function createRuntime(agent: AgentDef): Runtime {
       });
     case "codex":
       return new CodexRuntime({ model: agent.model, apiKey: agent.apiKey, approvalPolicy: agent.approvalPolicy });
+    case "native":
+      // Phase F: self-hosted loop. Pass the bus so telemetry flows straight to dispatch + game.
+      // When the token gateway is enabled, route through it with a virtual key instead.
+      return new NativeRuntime({ model: agent.model, apiKey: agent.apiKey, bus, gatewayUrl });
     default:
       console.error(`[fatal] unsupported runtime: ${agent.runtime}`);
       process.exit(1);
@@ -163,6 +168,10 @@ async function main() {
     process.exit(1);
   }
 
+  // Load model tier registry (small/mid/large → concrete model ids)
+  const { setModelRegistry } = await import("./gateway/models.js");
+  setModelRegistry(config.fleet.models);
+
   const transport = createTransport(config);
   const bus = new FleetEventBus();
 
@@ -171,9 +180,15 @@ async function main() {
     workspaces.push({ alias: "cwd", path: config.workspace });
   }
 
+  // When the token gateway is enabled, native agents route through it (real keys
+  // stay server-side). It lives on the same process/port as the API.
+  const gatewayUrl = config.gateway?.enabled
+    ? `http://127.0.0.1:${process.env.BRIDGE_PORT || "3847"}/gateway`
+    : undefined;
+
   const fleet = new FleetManager(bus, {
     workspaces,
-    createRuntime: (agentDef: AgentDef) => createRuntime(agentDef),
+    createRuntime: (agentDef: AgentDef) => createRuntime(agentDef, bus, gatewayUrl),
     ensureRulesSync: (agentDef: AgentDef) => ensureRulesSync(agentDef, config.workspace),
     getAgentDef: (runtime: RuntimeType, model?: string) => {
       const match = config.agents.find((a) => a.runtime === runtime);
@@ -182,6 +197,7 @@ async function main() {
         cursor: "claude-sonnet-4-6",
         "claude-code": "claude-sonnet-4-6",
         codex: "o4-mini",
+        native: "gpt-4o-mini",
       };
       return { name: runtime, runtime, apiKey: "", model: model || defaultModels[runtime] || "claude-sonnet-4-6" };
     },
@@ -191,6 +207,30 @@ async function main() {
 
   await fleet.restore();
   fleet.setPostReplyHook(createPostReplyHook(fleet, workspaces, config.fleet.comms));
+
+  // Dispatch engine — consumes gateway telemetry for cost/conflict/capability routing
+  const { DispatchEngine } = await import("./fleet/dispatch-engine.js");
+  const dispatchEngine = new DispatchEngine(bus, {
+    budgetUsdPerAgent: config.fleet.budgetUsdPerAgent,
+    lockTtlMs: config.fleet.lockTtlMs,
+  });
+  fleet.setDispatchEngine(dispatchEngine);
+
+  // Game engine — turns telemetry into XP/level/mood (gamification)
+  const { GameEngine } = await import("./fleet/game-state.js");
+  const gameEngine = new GameEngine(bus);
+  fleet.setGameEngine(gameEngine);
+
+  // Artifact engine — turns tool-call telemetry into the workspace "atlas" of
+  // files-as-loot (rarity/level from how widely each file is used). Subscribes
+  // live, then replays persisted traces so the atlas is populated on boot.
+  const { ArtifactEngine } = await import("./fleet/artifact-engine.js");
+  const artifactEngine = new ArtifactEngine(bus, {
+    resolveWorkspace: (agent) => fleet.getAgent(agent)?.workspace || "unknown",
+  });
+  const replay = artifactEngine.ingestTraceDir(join(GLOBAL_CONFIG_DIR, "fleet", "traces"));
+  if (replay.calls > 0) console.log(`[atlas] replayed ${replay.calls} tool calls from ${replay.files} trace files`);
+  fleet.setArtifactEngine(artifactEngine);
 
   // Wire command router (handles all Telegram commands + @mentions + routing)
   const { getNotifyChatId } = setupCommandRouter({
@@ -323,7 +363,7 @@ async function main() {
 
   const realPort = parseInt(process.env.BRIDGE_PORT || "") || 3847;
   const port = realPort;
-  const app = createServerApp(fleet, config);
+  const app = createServerApp(fleet, config, bus);
 
   // Event logging
   bus.onEvent((event) => {

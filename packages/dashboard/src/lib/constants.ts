@@ -30,6 +30,16 @@ export function getAgentColor(runtime: string): string {
 }
 
 export const RUNTIME_MODELS: Record<string, string[]> = {
+  // Self-hosted OpenAI loop (the dispatcher runs on this). Ordered strongest→cheapest.
+  native: [
+    "gpt-5.1",
+    "gpt-5.2",
+    "gpt-5",
+    "gpt-4.1",
+    "gpt-4o",
+    "o4-mini",
+    "gpt-4o-mini",
+  ],
   cursor: [
     "claude-opus-4-6",
     "claude-sonnet-4-6",

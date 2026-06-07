@@ -5,11 +5,29 @@ telegram:
   allowed_chats:
     - "your-chat-id"    # Get via: send /start to @userinfobot on Telegram
 
+# Runtimes: prefer `codex` (OpenAI) or `claude-code` (Anthropic) — their model
+# traffic flows through the Thronglets gateway, which unlocks tool-call visibility,
+# per-task model switching, telemetry-driven dispatch, and gamification.
+# `cursor` is DEPRECATED: it runs in Cursor's cloud and bypasses the gateway.
 agents:
   - name: default
-    runtime: cursor
-    api_key: ${CURSOR_API_KEY}  # Get from: https://cursor.com/settings
-    model: claude-opus-4-6
+    runtime: codex
+    api_key: ${OPENAI_API_KEY}   # Get from: https://platform.openai.com/api-keys
+    model: gpt-4o-mini
+
+  # - name: claude
+  #   runtime: claude-code
+  #   api_key: ${ANTHROPIC_API_KEY}
+  #   model: claude-haiku-4-5-20251001
+
+  # `native` (Phase F): Thronglets runs the agent loop itself — no vendor SDK.
+  # Talks to the OpenAI/Anthropic API directly, executes tools in-process, and
+  # emits telemetry straight to the fleet bus (dispatch + gamification for free).
+  # Provider is inferred from the model id (claude* → anthropic, else openai).
+  # - name: nova
+  #   runtime: native
+  #   api_key: ${OPENAI_API_KEY}
+  #   model: gpt-4o-mini
 
 # Dispatcher: AI-powered message router that manages the fleet
 dispatcher:
@@ -40,6 +58,42 @@ fleet:
     inter_agent: summary
     # tool_calls: show fleet tool execution logs
     tool_calls: true
+
+  # ─── Gateway-powered dispatch (Phase A–E) ───
+  # Per-task model tiers. Dispatch picks small/mid/large per task and the gateway
+  # rewrites the model on the fly. Override the defaults here if you like:
+  # models:
+  #   openai:    { small: gpt-4o-mini, mid: gpt-4o, large: gpt-4.1 }
+  #   anthropic: { small: claude-haiku-4-5-20251001, mid: claude-sonnet-4-6, large: claude-opus-4-8 }
+
+  # Per-agent USD budget (0 = unlimited). The dispatch engine flags over-budget throngs.
+  # budget_usd_per_agent: 0
+
+  # File-ownership lock window (ms). Stops two throngs editing the same file at once.
+  # lock_ttl_ms: 300000
+
+# ─── Token gateway (governance) ───
+# A real LLM gateway (Bifrost-inspired): the gateway holds the upstream provider
+# keys, and every agent reaches the model through a *virtual key* (`vk-<name>`)
+# — so no throng ever holds an `sk-…`. Per-VK budgets/rate-limits are metered and
+# enforced; provider keys load-balance and fail over. Stats at GET /gateway/stats.
+#
+# When `gateway.enabled: true`, native agents are automatically routed through it.
+# Omit the block entirely to keep today's behavior (direct provider calls).
+# gateway:
+#   enabled: true
+#   providers:
+#     openai:    { keys: ["${OPENAI_API_KEY}"] }   # one or more — extra keys = failover
+#     anthropic: { keys: ["${ANTHROPIC_API_KEY}"] }
+#   virtual_keys:
+#     # The dispatcher gets a generous budget and downgrades (not blocks) when spent.
+#     _dispatcher: { providers: [openai], budget: { usd: 5, window: daily }, on_exceed: downgrade }
+#     # Default for every other throng: hard daily cap + rate limit.
+#     "*":         { budget: { usd: 2, window: daily }, on_exceed: block, rpm: 60 }
+#   # budget windows: daily | monthly | total. on_exceed: block | downgrade.
+
+# Gateway: set THRONGLETS_GATEWAY_ENABLED=false to disable the API proxy entirely
+# (falls back to plain SDK calls — no telemetry, dispatch, or gamification).
 
 # Optional: local conversation logs
 session:

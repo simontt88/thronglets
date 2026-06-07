@@ -80,10 +80,13 @@ const TOOLS: Record<string, ToolDef> = {
   fleet_spawn: {
     permission: "dispatcher",
     async execute(args, _agentName, fleet) {
-      const runtime = (args.runtime as string) || "cursor";
+      // Default to the runtime the fleet actually uses (native/codex/claude-code),
+      // never the deprecated "cursor". Picking a runtime with no API key used to
+      // fail silently here.
+      const runtime = (args.runtime as string) || fleet.defaultRuntime();
       const workspace = args.workspace as string;
-      if (!workspace) return "Error: fleet_spawn requires 'runtime' and 'workspace'";
-      const result = await fleet.spawn(undefined, runtime as "cursor", workspace);
+      if (!workspace) return "Error: fleet_spawn requires 'workspace'";
+      const result = await fleet.spawn(undefined, runtime as "native", workspace);
       return result;
     },
   },
@@ -179,31 +182,67 @@ const TOOLS: Record<string, ToolDef> = {
       return fleet.getRecentTaskLog(limit);
     },
   },
+
+  fleet_set_tier: {
+    permission: "dispatcher",
+    async execute(args, _agentName, fleet) {
+      const name = args.name as string;
+      const tier = args.tier as string;
+      const oneShot = args.one_shot === true || args.oneShot === true;
+      if (!name || !tier) return "Error: fleet_set_tier requires 'name' and 'tier' (small|mid|large)";
+      const { directiveStore } = await import("../gateway/directives.js");
+      const { isValidTier } = await import("../gateway/models.js");
+      if (!isValidTier(tier)) return `Error: invalid tier "${tier}" — use small, mid, or large`;
+      if (!fleet.hasAgent(name)) return `Error: agent "${name}" not found`;
+      directiveStore.setTier(name, tier, oneShot);
+      return `Set @${name} model tier → ${tier}${oneShot ? " (next task only)" : ""}`;
+    },
+  },
+
+  fleet_dispatch_status: {
+    permission: "dispatcher",
+    async execute(_args, _agentName, fleet) {
+      const engine = fleet.getDispatchEngine();
+      if (!engine) return "Dispatch engine not active (gateway disabled?)";
+      return engine.summary();
+    },
+  },
 };
+
+/** A result string is a failure if the tool reported an error/blocker rather than success. */
+function isToolFailure(text: string): boolean {
+  return /^(error|no api key|unknown|invalid|permission denied|"[^"]+" already exists)/i.test(text.trim());
+}
+
+export interface ToolCallResult {
+  action: string;
+  text: string;
+  ok: boolean;
+}
 
 export function createPostReplyHook(
   fleet: FleetManager,
   workspaces: WorkspaceEntry[],
   commsMode: CommsMode,
 ) {
-  return async (agentName: string, reply: string, _sender: MessageSender): Promise<string> => {
+  return async (agentName: string, reply: string, sender: MessageSender): Promise<string> => {
     const matches = [...reply.matchAll(FLEET_MARKER_REGEX)];
     if (matches.length === 0) return reply;
 
     const isDispatcher = agentName === DISPATCHER_NAME;
-    const results: string[] = [];
+    const results: ToolCallResult[] = [];
 
     for (const match of matches) {
       const [_fullMatch, action, argsJson] = match;
       const tool = TOOLS[action];
 
       if (!tool) {
-        results.push(`[FLEET-RESULT:${action}:unknown tool]`);
+        results.push({ action, text: `unknown tool "${action}"`, ok: false });
         continue;
       }
 
       if (tool.permission === "dispatcher" && !isDispatcher) {
-        results.push(`[FLEET-RESULT:${action}:permission denied — only dispatcher can use ${action}]`);
+        results.push({ action, text: `permission denied — only dispatcher can use ${action}`, ok: false });
         console.log(`[fleet-tools] ${agentName} tried ${action} but lacks permission`);
         continue;
       }
@@ -211,11 +250,11 @@ export function createPostReplyHook(
       try {
         const args = JSON.parse(argsJson);
         const result = await tool.execute(args, agentName, fleet, workspaces, commsMode);
-        results.push(`[FLEET-RESULT:${action}:${result}]`);
+        results.push({ action, text: result, ok: !isToolFailure(result) });
         console.log(`[fleet-tools] ${agentName} called ${action}: ${result.slice(0, 80)}`);
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        results.push(`[FLEET-RESULT:${action}:error — ${errMsg.slice(0, 80)}]`);
+        results.push({ action, text: `error — ${errMsg.slice(0, 120)}`, ok: false });
         console.warn(`[fleet-tools] ${agentName} ${action} FAILED: ${errMsg.slice(0, 120)} | args: ${argsJson.slice(0, 100)}`);
       }
     }
@@ -224,6 +263,11 @@ export function createPostReplyHook(
     if (results.length > 0) {
       console.log(`[fleet-tools] ${agentName}: ${results.length} tool call(s) executed`);
     }
+
+    // Close the loop: a fleet command that failed used to vanish silently, so the
+    // dispatcher would tell the human "done" while nothing happened. Feed the
+    // outcome back so it can retry correctly or escalate.
+    fleet.onDispatcherToolResults(agentName, results, sender).catch(() => {});
 
     return cleanReply;
   };
@@ -238,7 +282,8 @@ You can execute fleet operations by including markers in your reply:
 
 - Send message to agent: [FLEET:fleet_send:{"agent":"name","text":"message"}]
 - Send with file paths: [FLEET:fleet_send:{"agent":"name","text":"message","files":["/abs/path/file.ts"]}]
-- Spawn new agent: [FLEET:fleet_spawn:{"runtime":"cursor","workspace":"alias"}]  (name is auto-assigned — do NOT pick a name)
+- Spawn new agent: [FLEET:fleet_spawn:{"workspace":"alias"}]  (name + runtime are auto-assigned — do NOT pick a name, and OMIT "runtime" so it matches the fleet's runtime)
+  To hatch into a BRAND-NEW workspace: first [FLEET:fleet_workspace_add:{"alias":"short-name","path":"/absolute/path"}] (the directory is created if missing), THEN fleet_spawn into that alias.
 - Kill agent: [FLEET:fleet_kill:{"name":"agentname"}]
 - Clear agent session: [FLEET:fleet_clear:{"name":"agentname"}]
 - Get fleet status: [FLEET:fleet_status:{}]
@@ -253,6 +298,11 @@ You can execute fleet operations by including markers in your reply:
   Levels: "critical" (always delivered), "info" (throttled, for progress updates)
 - View task log: [FLEET:fleet_task_log:{"limit":20}]
   See recent task dispatches and their outcomes (completed/failed/pending).
+- Set a throng's model tier: [FLEET:fleet_set_tier:{"name":"agentname","tier":"small|mid|large","one_shot":true}]
+  Picks which model class runs the throng's NEXT task. small=cheap/fast, mid=balanced, large=most capable.
+  one_shot:true applies to one task then reverts. Use large for refactors/architecture/hard debugging, small for renames/typos/formatting.
+- View dispatch telemetry: [FLEET:fleet_dispatch_status:{}]
+  Per-throng cost, tool counts, success rate, active file locks, and budget status — use this to route smartly and avoid two throngs editing the same file.
 
 You can include multiple markers in one reply. Results are logged to your session.
 Include the marker anywhere in your reply text — it will be stripped before showing to the user.

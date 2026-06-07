@@ -29,7 +29,12 @@ function isLoopbackOrigin(origin: string): boolean {
 
 function isOriginAllowed(origin: string | undefined): boolean {
   if (!origin) return true;
-  return isLoopbackOrigin(origin) || EXTRA_ALLOWED_ORIGINS.has(origin);
+  if (isLoopbackOrigin(origin) || EXTRA_ALLOWED_ORIGINS.has(origin)) return true;
+  try {
+    const host = new URL(origin).hostname;
+    if (host.endsWith(".ngrok.app") || host.endsWith(".ngrok-free.app")) return true;
+  } catch {}
+  return false;
 }
 
 function isMediaPathAllowed(filePath: string, fleet: FleetManager): boolean {
@@ -64,7 +69,9 @@ export function createHttpApp(
 
   app.use((req, res, next) => {
     const origin = req.header("Origin");
-    const allowed = isOriginAllowed(origin);
+    const p = req.path;
+    const isStaticAsset = p === "/" || p.startsWith("/assets/") || p.startsWith("/chill/") || p.endsWith(".html");
+    const allowed = isOriginAllowed(origin) || isStaticAsset;
     if (origin && allowed) {
       res.header("Access-Control-Allow-Origin", origin);
       res.header("Vary", "Origin");
@@ -104,6 +111,32 @@ export function createHttpApp(
       sleeping: status.sleeping,
       workspaces: fleet.listWorkspaces().map((w) => ({ alias: w.alias, path: w.path })),
       runtimes: config.agents.map((a) => ({ name: a.name, runtime: a.runtime, model: a.model })),
+    });
+  });
+
+  // Gamification + dispatch telemetry (gateway-derived)
+  app.get("/api/game", (_req, res) => {
+    const game = fleet.getGameEngine();
+    const dispatch = fleet.getDispatchEngine();
+    res.json({
+      stats: game ? game.getAll() : {},
+      dispatch: dispatch ? { totalCost: dispatch.getTotalCost() } : null,
+      enabled: !!game,
+    });
+  });
+
+  // Artifact atlas — files-as-loot, ranked by how widely each is used.
+  // ?workspace=<alias> scopes to one realm; omit for all. ?limit caps the list.
+  app.get("/api/atlas", (req, res) => {
+    const atlas = fleet.getArtifactEngine();
+    if (!atlas) { res.json({ items: [], summary: {}, enabled: false }); return; }
+    const workspace = typeof req.query.workspace === "string" ? req.query.workspace : undefined;
+    const limit = Math.max(1, Math.min(500, Number(req.query.limit) || 200));
+    res.json({
+      items: atlas.getAtlas(workspace).slice(0, limit),
+      summary: atlas.getSummary(),
+      workspaces: atlas.workspaces(),
+      enabled: true,
     });
   });
 
