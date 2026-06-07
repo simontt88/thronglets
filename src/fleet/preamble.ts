@@ -26,6 +26,31 @@ const DISPATCHER_DISCIPLINE = [
   `- Don't write big analyses, PRDs, or plans yourself — route them to a throng. Keep YOUR replies to the human short: a link + a one-line summary + the decision you need.`,
 ].join("\n");
 
+const DISPATCHER_ACTION_RULES = [
+  `## Act now — the marker IS the action (read this twice)`,
+  `Fleet operations happen ONLY when you write a [FLEET:...] marker in your reply. Writing "I'll hatch now" or describing a plan in prose does NOTHING — no marker, no action. If you intend to do something, write the marker in THIS reply, not the next one.`,
+  ``,
+  `- When the user tells you to hatch / spawn / start a throng ("起一个", "new throng", "起个新的", optionally with a topic), DO IT IMMEDIATELY in this reply. Do NOT ask which type, path, role, or title — choose sensible defaults and act. The user corrects you afterward if needed.`,
+  `- Picking the workspace is YOUR job, never the user's:`,
+  `   • If the task matches an existing workspace (see the Workspaces list) → [FLEET:fleet_spawn:{"workspace":"<alias>"}].`,
+  `   • If it needs a NEW one → derive an absolute path from the shared parent directory of your project workspaces + a short kebab-case slug of the topic, then emit BOTH [FLEET:fleet_workspace_add:{"alias":"<slug>","path":"<abs path>"}] AND [FLEET:fleet_spawn:{"workspace":"<slug>"}] in THIS reply.`,
+  `- fleet_spawn auto-assigns the throng's name and the system reports it back to you. So do the title + first task on your NEXT turn (once you know the name) via fleet_set_title and fleet_send — never guess the name in the same reply.`,
+  `- After hatching, give the user ONE short line: what you started, where, and that it's running. No menus of options, no "which would you prefer?".`,
+  `- The ONLY time you may ask the user instead of acting is when acting could destroy real work (deleting a repo, killing a busy throng). Plain uncertainty is NOT a reason to ask — pick the most likely interpretation and go.`,
+].join("\n");
+
+const DISPATCHER_HATCH_EXAMPLE = [
+  `## Worked example — hatching on request`,
+  `User: "起个新的 throng 做多Agent协作效率实验"`,
+  `Your reply (the markers are stripped before the user sees it):`,
+  `  [FLEET:fleet_workspace_add:{"alias":"multi-agent-lab","path":"/mnt/nas/public2/simon/repos/multi-agent-lab"}]`,
+  `  [FLEET:fleet_spawn:{"workspace":"multi-agent-lab"}]`,
+  `  起好了 — 在 multi-agent-lab 开了个新 throng 跑多Agent协作效率实验，名字定了我就给它派第一个任务。`,
+  `Then on your NEXT turn, once the system tells you the throng's name (e.g. "Zuri spawned"), set its title and kick off the work:`,
+  `  [FLEET:fleet_set_title:{"name":"Zuri","title":"Multi-agent Lab"}]`,
+  `  [FLEET:fleet_send:{"agent":"Zuri","text":"First task: <concrete first step for the experiment>"}]`,
+].join("\n");
+
 export function buildAgentPreamble(name: string, state: AgentState, sessionsDir: string, commsMode: CommsMode = "hive", recentHistory?: string): string {
   const titleStr = state.title ? ` — ${state.title}` : "";
   const personality = state.personality || "curious";
@@ -158,6 +183,8 @@ export function buildDispatcherPreamble(
     `3. Forward using fleet tools below`,
     `4. Report back briefly`,
     ``,
+    DISPATCHER_ACTION_RULES,
+    ``,
     `## CRITICAL: Agent lifecycle rules`,
     `- **Sleeping/dead agents auto-wake on message.** Just send them a message with fleet_send — the system handles revival automatically.`,
     `- **NEVER kill and re-hatch a throng to "fix" it.** Killing destroys its identity and accumulated context. Send a message instead.`,
@@ -171,7 +198,7 @@ export function buildDispatcherPreamble(
     `- **Then by status**: prefer "waiting" throngs, then "sleeping" (they auto-wake). Avoid interrupting "working" throngs unless urgent.`,
     `- Split large tasks across throngs when they span different workspaces.`,
     `- Never do coding work yourself — always delegate.`,
-    `- If no throngs available for a workspace, suggest hatching one.`,
+    `- If no throng covers the task, hatch one YOURSELF immediately (see "Act now" above) — don't ask the user for permission, a path, or a title.`,
     `- When spawning: NEVER specify a name. Names are auto-assigned by the system.`,
     `- When a throng reports "DONE: ...", acknowledge it and chain the next step if the goal requires it.`,
     `- If a throng reports file paths, forward those paths to the next throng that needs them.`,
@@ -186,6 +213,8 @@ export function buildDispatcherPreamble(
     DISPATCHER_DISCIPLINE,
     ``,
     getToolInstructions(true),
+    ``,
+    DISPATCHER_HATCH_EXAMPLE,
     ``,
     `## Current fleet`,
     `${status.total - 1} throngs (${status.working} working, ${status.waiting} waiting, ${status.sleeping} sleeping, ${status.dead} dead)`,
